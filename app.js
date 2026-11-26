@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.2.1';
+const VERSION = '1.3';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -75,8 +75,8 @@ const POSV = [
   { k: 'RIV', l: 'RIV', f: 'Rechter Innenverteidiger', g: 'Abwehr' },
   { k: 'LV', l: 'LV', f: 'Linksverteidiger (Viererkette)', g: 'Abwehr' }, { k: 'RV', l: 'RV', f: 'Rechtsverteidiger (Viererkette)', g: 'Abwehr' },
   { k: 'LS', l: 'LAV', f: 'Linker Außenverteidiger', g: 'Abwehr' }, { k: 'RS', l: 'RAV', f: 'Rechter Außenverteidiger', g: 'Abwehr' },
-  { k: 'SECHS', l: '6', f: 'Defensives Mittelfeld (6)', g: 'Mittelfeld' }, { k: 'ACHT', l: '8', f: 'Zentrales Mittelfeld (8)', g: 'Mittelfeld' },
-  { k: 'ZEHN', l: '10', f: 'Offensives Mittelfeld (10)', g: 'Mittelfeld' },
+  { k: 'SECHS', l: 'ZDM', f: 'Zentrales defensives Mittelfeld (ZDM)', g: 'Mittelfeld' }, { k: 'ACHT', l: 'ZM', f: 'Zentrales Mittelfeld (ZM)', g: 'Mittelfeld' },
+  { k: 'ZEHN', l: 'ZOM', f: 'Zentrales offensives Mittelfeld (ZOM)', g: 'Mittelfeld' },
   { k: 'LF', l: 'LF', f: 'Linker Flügel', g: 'Angriff' }, { k: 'RF', l: 'RF', f: 'Rechter Flügel', g: 'Angriff' },
   { k: 'ACHTFUENF', l: '8,5', f: 'Hängende Spitze (8,5)', g: 'Angriff' }, { k: 'NEUN', l: '9', f: 'Spitze (9)', g: 'Angriff' }];
 const posvOf = k => POSV.find(p => p.k === k);
@@ -118,11 +118,11 @@ function migratePositions() {
   if (n) Store.flushSoon();
 }
 const MAKRO = { HR: 'Hinrunde', RR: 'Rückrunde' };
-const PHC = { vorb: '#0284c7', wettk: '#15803d', nachb: '#9333ea' };
+const PHC = { vorb: '#4a9fb5', wettk: '#5a63b8', nachb: '#a77bb8' };
 const LEVELS = [
   { k: 'NLZ', l: 'NLZ' }, { k: 'Regio', l: 'Regionalliga' }, { k: 'VL', l: 'Verbandsliga' },
   { k: 'BZL', l: 'Bezirksliga' }, { k: 'SDL', l: 'Sonderliga' }, { k: '', l: 'Ohne Niveau' }];
-const GTYPES = ['Liga', 'Test', 'Turnier', 'Leistungsvergleich', 'Sonstiges'];
+const GTYPES = ['Liga', 'Test', 'LV', 'Turnier'];
 const LVL3 = ['niedrig', 'mittel', 'hoch'];
 const FITL = { 3: 'Ideal', 2: 'Gut', 1: 'Möglich', 0: '–' };
 
@@ -163,13 +163,14 @@ const Store = {
   get(id) { const it = this.items.get(id); return it ? { id, ...it.data } : null; },
   data(id) { return this.items.get(id)?.data; },
   put(id, kind, data, quiet) {
+    Undo.record(id, this.items.get(id));
     const clean = { ...data }; delete clean.id;
     this.items.set(id, { id, kind, data: clean });
     this.pending[id] = { op: 'up', kind, data: clean };
     this.persist(); if (!quiet) this.flushSoon();
   },
   patch(id, kind, part) { this.put(id, kind, { ...(this.items.get(id)?.data || {}), ...part }); },
-  remove(id) { this.items.delete(id); this.pending[id] = { op: 'del' }; this.persist(); this.flushSoon(); },
+  remove(id) { Undo.record(id, this.items.get(id)); this.items.delete(id); this.pending[id] = { op: 'del' }; this.persist(); this.flushSoon(); },
   persist() {
     try {
       localStorage.setItem(this.key(), JSON.stringify([...this.items.values()]));
@@ -234,7 +235,7 @@ const Sync = {
 const setting = () => Store.data('setting:main') || { trainingDays: [2, 4, 5], squadMax: 17, dresscode: {}, exPlayers: 16 };
 
 // ───────────────────────── UI-Grundgerüst ─────────────────────────
-const UI = { ex: { n: null, diff: '', int: '', ph: '', q: '', sort: 'fit' }, ath: { cat: '', q: '' }, kader: { grp: '', q: '' },
+const UI = { vereine: { q: '', inc: false }, ex: { n: null, diff: '', int: '', ph: '', tph: '', q: '', sort: 'fit' }, ath: { cat: '', q: '' }, kader: { grp: '', q: '' },
   games: { when: 'next', type: '' }, tests: { lvls: new Set(), st: '', q: '' }, contacts: { q: '' }, scout: { prio: '', q: '' }, topics: { ph: '' }, mat: 'need' };
 
 const TABS = [
@@ -253,6 +254,7 @@ let lastHash = null;
 function render() {
   const r = route(), sameRoute = lastHash === location.hash, y = window.scrollY;
   lastHash = location.hash;
+  if (!location.hash.includes('periodisierung')) periodView._done = false;
   $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-k="${t.k}" class="${t.k === r.tab ? 'on' : ''}">${icon(t.k)}<span>${t.l}</span></button>`).join('');
   let out;
   try { out = (VIEWS[r.tab] || VIEWS.heute)(r.parts); }
@@ -323,7 +325,7 @@ function field(f, v) {
       if (f.selFirst) opts.sort((a, b) => (arr.includes(b.v) ? 1 : 0) - (arr.includes(a.v) ? 1 : 0));
       for (const o of opts) {
         if (!f.selFirst && o.g !== undefined && o.g !== grp) { grp = o.g; rows += `<div class="grp">${esc(grp)}</div>`; }
-        rows += `<label data-q="${esc((o.l + ' ' + (o.s || '') + ' ' + (o.g || '')).toLowerCase())}"><input type="checkbox" name="${f.k}" value="${esc(o.v)}" ${arr.includes(o.v) ? 'checked' : ''}><span class="ml">${esc(o.l)}${o.s ? `<small>${esc(o.s)}</small>` : ''}</span>${o.r || ''}</label>`;
+        rows += `<label data-q="${esc((o.l + ' ' + (o.s || '') + ' ' + (o.g || '')).toLowerCase())}"><input type="checkbox" name="${f.k}" value="${esc(o.v)}" ${arr.includes(o.v) ? 'checked' : ''}><span class="ml ${o.inline ? 'inl' : ''}">${o.dot ? `<span class="dot" style="background:${o.dot}"></span>` : ''}<b>${esc(o.l)}</b>${o.s ? (o.inline ? `<span class="mlpos">${o.s}</span>` : `<small>${esc(o.s)}</small>`) : ''}</span>${o.r || ''}</label>`;
       }
       return `<div class="f">${f.l ? `<div class="lab">${esc(f.l)}</div>` : ''}${opts.length > 8 ? `<input type="text" class="search" placeholder="Suchen…" data-filter="${f.k}">` : ''}
         <div class="multi" data-multi="${f.k}">${rows || '<div class="empty">Keine Einträge</div>'}</div><div class="multi-count" data-count="${f.k}" data-max="${f.max || ''}"></div>${hint}</div>`; }
@@ -460,6 +462,11 @@ function weekStrip(t) {
   }
   return h + `</div>`;
 }
+// Kader-Aufgabe: Wochenendspiel ab Freitag 18 Uhr, Spiel unter der Woche ab Sonntag 14 Uhr davor
+function squadDue(g) {
+  const wd = dayIdx(g.date);
+  return wd >= 6 ? new Date(D.add(g.date, 5 - wd) + 'T18:00') : new Date(D.add(g.date, -wd) + 'T14:00');
+}
 const todoRow = (ic, title, sub, attrs, right = '') => `<div class="todo" ${attrs}><span class="ti">${icon(ic)}</span><div class="grow"><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>${right || icon('chev', 'chev')}</div>`;
 function viewHeute() {
   if (!phases().length && !Store.all('game').length) return { title: 'Heute', html: emptyState() };
@@ -486,10 +493,11 @@ function viewHeute() {
   if (g && D.diff(t, g.date) <= 7) {
     const items = Store.all('checkitem'), open = items.filter(i => !(g.checks || {})[i.id]).length;
     if (open) { n++; todo += todoRow('spiele', `Spieltag ${esc(shortOpp(g.opponent))}: ${open} Punkte offen`, `Checkliste · ${relDay(g.date)}`, `data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}"`); }
-    if (!(g.squad || []).length) { n++; todo += todoRow('kader', `Kader für ${esc(shortOpp(g.opponent))} wählen`, relDay(g.date), `data-a="pickSquad" data-id="${esc(g.id)}"`); }
   }
-  const cb = Store.all('club').filter(c => c.callback && !c.done).length;
-  if (cb) { n++; todo += todoRow('tests', `Testspiele: ${cap(cb, 'Verein', 'Vereine')} zurückmelden`, 'Testspielplanung', `data-a="testsStatus" data-v="callback"`); }
+  for (const x of Store.all('game').filter(x => !x.cancelled && x.date >= t && D.diff(t, x.date) <= 8 && !(x.squad || []).length).sort(byDate))
+    if (new Date() >= squadDue(x)) { n++; todo += todoRow('kader', `Kader für ${esc(shortOpp(x.opponent))} eintragen`, `${D.long(x.date)} · ${relDay(x.date)}`, `data-a="pickSquad" data-id="${esc(x.id)}"`); }
+  const cb = Store.all('club').filter(c => clubStatus(c) === 'pending').length;
+  if (cb) { n++; todo += todoRow('tests', `Testspiele: ${cap(cb, 'Verein', 'Vereine')} ohne Rückmeldung`, 'nachhaken in der Testspielplanung', `data-a="testsStatus" data-v="pending"`); }
   const noNum = players().filter(p => !p.number);
   if (noNum.length) { n++; todo += todoRow('kader', `${cap(noNum.length, 'Spieler', 'Spieler')} ohne Rückennummer`, esc(noNum.map(p => p.short || p.name).join(', ')), `data-a="open" data-h="#/kader/liste"`); }
   if (cur) {
@@ -622,17 +630,27 @@ function viewWeek(key) {
 
 // ───────────────────────── Spiele & Spieltag ─────────────────────────
 function parseResult(r) { const m = /^\s*(\d+)\s*[:\-]\s*(\d+)\s*$/.exec(r || ''); return m ? [+m[1], +m[2]] : null; }
-function outcome(g) { const r = parseResult(g.result); if (!r) return null; return r[0] > r[1] ? 'S' : r[0] < r[1] ? 'N' : 'U'; }
+const hasRes = g => !!(parseResult(g.result) || hasPlace(g));
 const OUT = { S: { l: 'Sieg', c: '#16a34a' }, U: { l: 'Unentschieden', c: '#d4a106' }, N: { l: 'Niederlage', c: '#dc2626' } };
 // Offene Punkte eines Spiels: nach dem Spiel Ergebnis + nicht abgehakte Checkliste
 function openItems(g) {
   if (g.cancelled || g.date >= D.today()) return 0;
   const items = Store.all('checkitem');
-  return (parseResult(g.result) ? 0 : 1) + items.filter(i => !(g.checks || {})[i.id]).length;
+  return (hasRes(g) ? 0 : 1) + items.filter(i => !(g.checks || {})[i.id]).length;
 }
-const gameDone = g => g.cancelled || (g.date < D.today() && !!parseResult(g.result));
-const needsResult = g => !g.cancelled && g.date < D.today() && !parseResult(g.result);
+const gameDone = g => g.cancelled || (g.date < D.today() && hasRes(g));
+const needsResult = g => !g.cancelled && g.date < D.today() && !hasRes(g);
 const shortOpp = s => (s || 'Spiel').replace(/\s*\((?:U\d+|F)\)/gi, '').replace(/\s+U1\d(\/\d)?(-\d)?\b/g, '').trim();
+// ───────────── Spiele: Platzierungen, Formkurve mit Sprechblase, Startelf auf dem Feld (Version 1.3) ─────────────
+const PLACE_TYPES = ['LV', 'Turnier'];
+const hasPlace = g => PLACE_TYPES.includes(g.type) && +g.place > 0;
+function outcome(g) {
+  const r = parseResult(g.result);
+  if (r) return r[0] > r[1] ? 'S' : r[0] < r[1] ? 'N' : 'U';
+  if (hasPlace(g)) return +g.place === 1 ? 'S' : +g.place <= 4 ? 'U' : 'N';
+  return null;
+}
+const resText = g => parseResult(g.result) ? g.result : hasPlace(g) ? `Platz ${g.place}` : '';
 function formCurve(games) {
   const gs = games.filter(g => !g.cancelled && outcome(g)).sort(byDate);
   if (gs.length < 2) return '';
@@ -643,16 +661,136 @@ function formCurve(games) {
   const line = roll.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   const area = `${line} L${x(n - 1).toFixed(1)},76 L${x(0).toFixed(1)},76 Z`;
   const tot = { S: 0, U: 0, N: 0 }; let gf = 0, ga = 0;
-  for (const g of gs) { tot[outcome(g)]++; const r = parseResult(g.result); gf += r[0]; ga += r[1]; }
-  const last5 = gs.slice(-5);
-  return `<div class="card form"><div class="row"><b class="grow">Formkurve</b><span class="small mute">${tot.S} S · ${tot.U} U · ${tot.N} N · Tore ${gf}:${ga}</span></div>
+  for (const g of gs) { tot[outcome(g)]++; const r = parseResult(g.result); if (r) { gf += r[0]; ga += r[1]; } }
+  const last5 = gs.slice(-5), bh = { S: 20, U: 11, N: 4 };
+  formCurve.games = gs;
+  return `<div class="card form" id="formcard"><div class="row"><b class="grow">Formkurve</b><span class="small mute">${tot.S} S · ${tot.U} U · ${tot.N} N · Tore ${gf}:${ga}</span></div>
     <svg viewBox="0 0 ${W} ${H}" class="curve" role="img" aria-label="Formkurve">
       <line x1="${pad}" x2="${W - pad}" y1="${y(1.5)}" y2="${y(1.5)}" class="mid"/>
       <path d="${area}" class="area"/><path d="${line}" class="ln"/>
-      ${gs.map((g, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(roll[i]).toFixed(1)}" r="2.2" class="pt"/><rect x="${(x(i) - 3).toFixed(1)}" y="${106 - { S: 20, U: 11, N: 4 }[outcome(g)]}" width="6" height="${{ S: 20, U: 11, N: 4 }[outcome(g)]}" rx="2" fill="${OUT[outcome(g)].c}"/>`).join('')}
-    </svg>
-    <div class="row small"><span class="mute grow">Linie: Punkteschnitt der letzten 5 Spiele (0–3)</span><span>Letzte 5: ${last5.map(g => `<span class="fdot" style="background:${OUT[outcome(g)].c}">${outcome(g)}</span>`).join('')}</span></div></div>`;
+      ${gs.map((g, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(roll[i]).toFixed(1)}" r="2.2" class="pt"/><rect x="${(x(i) - 3).toFixed(1)}" y="${106 - bh[outcome(g)]}" width="6" height="${bh[outcome(g)]}" rx="2" fill="${OUT[outcome(g)].c}"/>
+        <rect class="hit" data-fi="${i}" x="${(x(i) - (W - 2 * pad) / n / 2).toFixed(1)}" y="0" width="${((W - 2 * pad) / n).toFixed(1)}" height="${H}"/>`).join('')}
+    </svg><div class="bubble" id="fbubble" hidden></div>
+    <div class="row small"><span class="mute grow">Punkt antippen für Details · Linie: Punkteschnitt der letzten 5 (Platz 1 = Sieg, 2–4 = Remis)</span><span>Letzte 5: ${last5.map(g => `<span class="fdot" style="background:${OUT[outcome(g)].c}">${outcome(g)}</span>`).join('')}</span></div></div>`;
 }
+function showBubble(i, rectEl) {
+  const g = (formCurve.games || [])[i], card = $('#formcard'), b = $('#fbubble'); if (!g || !card || !b) return;
+  const o = outcome(g);
+  b.innerHTML = `<div class="bb-d">${D.long(g.date)} ${D.parse(g.date).getFullYear()}${g.type ? ' · ' + esc(g.type) : ''}</div>
+    <div class="bb-o">${esc(shortOpp(g.opponent))}${g.ha ? ` <span class="ha ${g.ha}">${g.ha}</span>` : ''}</div>
+    <div class="bb-r" style="color:${OUT[o].c}">${esc(resText(g))} · ${OUT[o].l}</div><button class="link" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">Spiel öffnen</button>`;
+  b.hidden = false;
+  const cr = card.getBoundingClientRect(), rr = rectEl.getBoundingClientRect();
+  const cx = rr.left + rr.width / 2 - cr.left, bw = b.offsetWidth;
+  b.style.left = Math.max(6, Math.min(cr.width - bw - 6, cx - bw / 2)) + 'px';
+  b.style.top = (rr.top - cr.top + 4) + 'px';
+  b.style.setProperty('--ax', (cx - Math.max(6, Math.min(cr.width - bw - 6, cx - bw / 2))) + 'px');
+  $$('#formcard .hit').forEach(h => h.classList.toggle('on', h === rectEl));
+}
+document.addEventListener('pointerover', e => { const h = e.target.closest && e.target.closest('#formcard .hit'); if (h && e.pointerType === 'mouse') showBubble(+h.dataset.fi, h); });
+document.addEventListener('click', e => {
+  const h = e.target.closest && e.target.closest('#formcard .hit');
+  if (h) { showBubble(+h.dataset.fi, h); return; }
+  if (!e.target.closest || !e.target.closest('#fbubble')) { const b = $('#fbubble'); if (b) b.hidden = true; }
+}, true);
+// Platzierung per Drehrad (wie iOS-Wecker)
+function placeSheet(g) {
+  const cur = +g.place || 1, IH = 40;
+  Sheet.open(`Platzierung · ${shortOpp(g.opponent)}`, `<div class="small mute" style="margin-bottom:10px">${D.long(g.date)} · ${esc(g.type)} – auf welchem Platz seid ihr gelandet?</div>
+    <div class="wheelwrap"><div class="wheel" id="wheel">${Array.from({ length: 30 }, (_, i) => `<div class="wi" data-v="${i + 1}">${i + 1}. Platz</div>`).join('')}</div><div class="wheel-band"></div></div>
+    <div class="small mute" style="margin-top:10px;text-align:center">Platz 1 zählt als Sieg, 2–4 als Unentschieden, ab 5 als Niederlage.</div>
+    <label class="toggle" style="margin-top:14px"><input type="checkbox" id="pcx" ${g.cancelled ? 'checked' : ''}>Ist ausgefallen / abgesagt</label>
+    <button class="link" data-a="resultScore" data-id="${esc(g.id)}" style="margin-top:6px">Stattdessen ein Spielergebnis eintragen</button>`,
+    `<button class="btn primary" data-a="placeSave" data-id="${esc(g.id)}">Speichern</button>`,
+    el => {
+      const w = $('#wheel', el); w.scrollTop = (cur - 1) * IH;
+      const mark = () => { const i = Math.round(w.scrollTop / IH); $$('.wi', w).forEach((d, j) => d.classList.toggle('on', j === i)); };
+      mark(); w.addEventListener('scroll', () => requestAnimationFrame(mark));
+      w.addEventListener('click', e => { const it = e.target.closest('.wi'); if (it) w.scrollTo({ top: (+it.dataset.v - 1) * IH, behavior: 'smooth' }); });
+    });
+}
+function resultForm(g, forceScore) {
+  if (!forceScore && PLACE_TYPES.includes(g.type) && !parseResult(g.result)) return placeSheet(g);
+  const r = parseResult(g.result) || ['', ''];
+  openForm({
+    title: `Ergebnis · ${g.opponent}`, value: { us: r[0], them: r[1] },
+    top: `<div class="small mute" style="margin-bottom:12px">${D.long(g.date)} · ${g.ha === 'A' ? 'auswärts' : g.ha === 'H' ? 'zuhause' : ''} – aus unserer Sicht</div>`,
+    fields: [[{ k: 'us', l: 'FC Hennef', t: 'number' }, { k: 'them', l: shortOpp(g.opponent), t: 'number' }],
+      { k: 'cancelled', l: 'Spiel ist ausgefallen / abgesagt', t: 'toggle' }],
+    onSave: async v => {
+      if (v.cancelled) { Store.patch(g.id, 'game', { cancelled: true, result: '' }); }
+      else { if (v.us === '' || v.them === '') return toast('Bitte beide Tore eintragen'); Store.patch(g.id, 'game', { result: `${v.us}:${v.them}`, cancelled: false }); }
+      await Sheet.close(); toast('Gespeichert'); render();
+    },
+  });
+}
+// Startelf auf dem Spielfeld: Bank unten, Spieler aufs Feld ziehen
+const SPOTS = [[50, 90], [16, 70], [38, 75], [62, 75], [84, 70], [50, 58], [30, 45], [70, 45], [16, 24], [50, 16], [84, 24]];
+function lineupOf(g) {
+  const lu = { ...(g.lineup || {}) };
+  for (const id of g.start11 || []) if (!lu[id]) { const s = freeSpot(lu, Store.data(id)); lu[id] = { x: s[0], y: s[1] }; }
+  for (const id of Object.keys(lu)) if (!Store.items.has(id)) delete lu[id];
+  return lu;
+}
+function freeSpot(lu, p) {
+  const taken = Object.values(lu), free = s => !taken.some(t => Math.hypot(t.x - s[0], t.y - s[1]) < 9);
+  if (p && p.group === 'TW' && free(SPOTS[0])) return SPOTS[0];
+  return SPOTS.slice(1).find(free) || SPOTS.find(free) || [50, 50];
+}
+function lineupSheet(gid) {
+  const g = Store.get(gid); if (!g) return;
+  const lu = lineupOf(g), on = Object.keys(lu);
+  const pool = ((g.squad || []).length ? g.squad : players().map(p => p.id)).filter(id => Store.items.has(id));
+  const bench = pool.filter(id => !on.includes(id)).map(id => Store.get(id)).sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || tierIdx(a) - tierIdx(b) || byName(a, b));
+  const tok = (p, cls, st = '') => `<span class="ltok ${cls}" data-ltok="${esc(p.id)}" style="--tc:${tierOf(p.tier).c};${st}">${esc(p.short || p.name)}${p.number ? `<i>${esc(p.number)}</i>` : ''}</span>`;
+  Sheet.open(`Startelf · ${shortOpp(g.opponent)}`, `<div class="row small" style="margin-bottom:8px"><b class="grow">${on.length}/11 auf dem Feld</b><button class="link" data-a="luClear" data-id="${esc(gid)}">Feld leeren</button></div>
+    <div class="lpitch" id="lpitch" data-gid="${esc(gid)}"><i class="lp-half"></i><i class="lp-circle"></i><i class="lp-box t"></i><i class="lp-box b"></i>
+      ${on.map(id => { const p = Store.get(id); return p ? tok(p, 'onp', `left:${lu[id].x}%;top:${lu[id].y}%`) : ''; }).join('')}</div>
+    <div class="benchlab small mute">Bank · ${bench.length} ${(g.squad || []).length ? 'aus dem Kader' : '(noch kein Kader gewählt – alle Spieler)'}</div>
+    <div class="bench" id="bench">${bench.map(p => tok(p, 'onb')).join('') || '<span class="tiny mute">Alle Spieler stehen auf dem Feld.</span>'}</div>
+    <div class="tiny mute" style="margin-top:8px">Spieler aufs Feld ziehen · antippen setzt ihn automatisch ein · auf dem Feld antippen oder zurück auf die Bank ziehen = raus.</div>`);
+}
+function saveLineup(gid, lu) {
+  Store.patch(gid, 'game', { lineup: lu, start11: Object.keys(lu) });
+  lineupSheet(gid); render();
+}
+const LDrag = { el: null, id: null, start: null, active: false, ghost: null, fromPitch: false };
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest && e.target.closest('[data-ltok]'); if (!el) return;
+  e.preventDefault();
+  Object.assign(LDrag, { el, id: el.dataset.ltok, start: [e.clientX, e.clientY], active: false, fromPitch: el.classList.contains('onp') });
+});
+document.addEventListener('pointermove', e => {
+  if (!LDrag.el) return;
+  if (!LDrag.active && Math.hypot(e.clientX - LDrag.start[0], e.clientY - LDrag.start[1]) > 6) {
+    LDrag.active = true; LDrag.el.classList.add('lifted');
+    const g = LDrag.el.cloneNode(true); g.className = 'ltok ghost'; document.body.appendChild(g); LDrag.ghost = g;
+  }
+  if (LDrag.active) { e.preventDefault(); LDrag.ghost.style.left = e.clientX + 'px'; LDrag.ghost.style.top = e.clientY + 'px'; }
+});
+document.addEventListener('pointerup', e => {
+  if (!LDrag.el) return;
+  const { id, active, fromPitch } = LDrag, pitch = $('#lpitch');
+  if (LDrag.ghost) LDrag.ghost.remove();
+  LDrag.el.classList.remove('lifted');
+  Object.assign(LDrag, { el: null, ghost: null, active: false });
+  if (!pitch) return;
+  const gid = pitch.dataset.gid, g = Store.get(gid), lu = lineupOf(g);
+  if (!active) { // Antippen
+    if (fromPitch) delete lu[id];
+    else { if (Object.keys(lu).length >= 11) return toast('Es stehen schon 11 auf dem Feld'); const s = freeSpot(lu, Store.data(id)); lu[id] = { x: s[0], y: s[1] }; }
+    return saveLineup(gid, lu);
+  }
+  const r = pitch.getBoundingClientRect();
+  const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (inside) {
+    if (!lu[id] && Object.keys(lu).length >= 11) return toast('Es stehen schon 11 auf dem Feld');
+    lu[id] = { x: Math.round(Math.max(6, Math.min(94, (e.clientX - r.left) / r.width * 100))), y: Math.round(Math.max(4, Math.min(96, (e.clientY - r.top) / r.height * 100))) };
+  } else if (fromPitch) delete lu[id];
+  else return;
+  saveLineup(gid, lu);
+});
+document.addEventListener('pointercancel', () => { if (LDrag.ghost) LDrag.ghost.remove(); if (LDrag.el) LDrag.el.classList.remove('lifted'); Object.assign(LDrag, { el: null, ghost: null, active: false }); });
 function gameTile(g) {
   const o = outcome(g), open = openItems(g), up = !g.cancelled && g.date >= D.today();
   const days = up ? D.diff(D.today(), g.date) : null;
@@ -660,7 +798,7 @@ function gameTile(g) {
     ${open ? `<span class="nbadge">${open}</span>` : ''}
     <div class="gd">${D.wd(g.date)} ${D.parse(g.date).getDate()}.${g.ha ? ` <span class="ha ${g.ha}">${g.ha}</span>` : ''}</div>
     <div class="go">${esc(shortOpp(g.opponent))}</div>
-    <div class="gr">${g.cancelled ? 'abgesagt' : o ? esc(g.result) : up ? (g.kickoff ? esc(g.kickoff) : days === 0 ? 'heute' : 'in ' + days + ' T.') : 'Ergebnis?'}</div>
+    <div class="gr">${g.cancelled ? 'abgesagt' : o ? esc(resText(g)) : up ? (g.kickoff ? esc(g.kickoff) : days === 0 ? 'heute' : 'in ' + days + ' T.') : 'Ergebnis?'}</div>
     <div class="gt">${esc(g.type || '')}${g.important ? ' ⭐' : ''}</div></div>`;
 }
 function viewSpiele(parts) {
@@ -671,10 +809,10 @@ function viewSpiele(parts) {
   const todo = all.filter(needsResult);
   let games = f.when === 'next' ? all.filter(g => !gameDone(g) && g.date >= t) : f.when === 'past' ? all.filter(g => g.date < t).reverse() : all;
   let h = `<div class="seg">${[['next', 'Kommend'], ['past', 'Gespielt'], ['all', 'Alle']].map(([v, l]) => `<button class="${f.when === v ? 'on' : ''}" data-a="gWhen" data-v="${v}">${l}</button>`).join('')}</div>`;
-  h += chips([['', 'Alle Typen'], ...GTYPES.map(x => [x, x])], f.type, 'gType');
+  h += `<div class="chips"><button class="chip blank ${f.type ? '' : 'on'}" data-a="gType" data-v="" aria-label="Alle Spielarten" title="Alle"></button>${GTYPES.map(x => `<button class="chip ${f.type === x ? 'on' : ''}" data-a="gType" data-v="${x}">${x}</button>`).join('')}</div>`;
   h += formCurve(all.filter(g => g.date < t));
-  { const cl = Store.all('club'), cb = cl.filter(c => c.callback && !c.done).length, dn = cl.filter(c => c.done).length;
-    h += `<div class="linkrow" data-a="open" data-h="#/tests">${icon('tests', 'mini')}<span class="grow">Testspielplanung${cb ? ` · <b>${cb} zurückmelden</b>` : ''} · ${dn} vereinbart</span>${icon('chev', 'chev')}</div>`; }
+  { const cl = Store.all('club'), cb = cl.filter(c => clubStatus(c) === 'pending').length, dn = cl.filter(c => clubStatus(c) === 'fix').length;
+    h += `<div class="linkrow" data-a="open" data-h="#/tests">${icon('tests', 'mini')}<span class="grow">Testspielplanung${cb ? ` · <b>${cb} ohne Rückmeldung</b>` : ''} · ${dn} fix</span>${icon('chev', 'chev')}</div>`; }
   if (todo.length) h += `<div class="card alert"><h3><span class="grow">Ergebnis eintragen</span><span class="nbadge static">${todo.length}</span></h3>
     <div class="list">${todo.map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)} · ${esc(g.type || 'Spiel')}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
   if (!games.length) h += '<div class="empty">Keine Spiele für diese Auswahl.</div>';
@@ -707,18 +845,19 @@ function viewGame(id) {
   let h = `<div class="card ${o ? 'o' + o : ''}" style="${o ? `border-left:5px solid ${OUT[o].c}` : ''}"><div class="row"><div class="grow"><div style="font-size:21px;font-weight:800">${esc(g.opponent || 'Spiel')}</div>
     <div class="small mute">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag noch offen' : D.long(g.date) + ' ' + D.parse(g.date).getFullYear()}</div></div>
     ${g.ha ? `<span class="ha ${g.ha}" style="font-size:14px">${g.ha === 'H' ? 'Heim' : 'Auswärts'}</span>` : ''}</div>
-    ${o ? `<div class="bigres" style="color:${OUT[o].c}">${esc(g.result)} <span>${OUT[o].l}</span></div>` : ''}
+    ${o ? `<div class="bigres" style="color:${OUT[o].c}">${esc(resText(g))} <span>${OUT[o].l}</span></div>` : ''}
     <div class="badges">${g.cancelled ? badge('abgesagt', '#64748b') : ''}${g.type ? badge(g.type) : ''}${g.important ? badge('wichtiges Spiel', '#d97706') : ''}${club && club.level ? badge(LEVELS.find(l => l.k === club.level)?.l || club.level) : ''}${g.source ? badge('fussball.de') : ''}</div>
     <dl class="kv" style="margin-top:12px">${g.meet ? `<dt>Treffen</dt><dd>${esc(g.meet)} Uhr</dd>` : ''}${g.kickoff ? `<dt>Anstoß</dt><dd>${esc(g.kickoff)} Uhr</dd>` : ''}${g.venue ? `<dt>Ort</dt><dd>${esc(g.venue)}</dd>` : ''}${g.note ? `<dt>Notiz</dt><dd>${esc(g.note)}</dd>` : ''}</dl>
+    <div class="kitrow"><span class="small mute">Trikots</span>${[['rot', '#c62828'], ['schwarz', '#1d1a29']].map(([k, c]) => `<button class="kit ${g.kit === k ? 'on' : ''}" style="--kc:${c}" data-a="setKit" data-id="${esc(id)}" data-v="${k}"><i></i>${k}</button>`).join('')}</div>
     <div class="row" style="margin-top:10px;gap:6px"><button class="btn sm" data-a="editGame" data-id="${esc(id)}">${icon('edit')} Spieldaten</button>
-    ${!g.cancelled && g.date <= D.today() ? `<button class="btn sm primary" data-a="quickResult" data-id="${esc(id)}">${o ? 'Ergebnis ändern' : 'Ergebnis eintragen'}</button>` : ''}</div></div>`;
+    ${!g.cancelled && g.date <= D.today() ? `<button class="btn sm primary" data-a="quickResult" data-id="${esc(id)}">${PLACE_TYPES.includes(g.type) && !parseResult(g.result) ? (o ? 'Platzierung ändern' : 'Platzierung eintragen') : o ? 'Ergebnis ändern' : 'Ergebnis eintragen'}</button>` : ''}</div></div>`;
   if (needsResult(g)) h += `<div class="warnbox">Das Spiel ist vorbei – bitte noch das Ergebnis eintragen.</div>`;
 
   const squad = g.squad || [], start = g.start11 || [], warn = startWarnings(g);
   h += sec('Kader & Startelf');
   h += `<div class="card"><div class="row"><b class="grow">Kader ${squad.length}/${s.squadMax || 17}</b><button class="btn sm" data-a="pickSquad" data-id="${esc(id)}">Kader wählen</button></div>
     <div style="margin-top:6px">${squad.map(p => `<span class="pill">${esc(playerName(p))}</span>`).join('') || '<span class="mute small">Noch kein Kader.</span>'}</div>
-    <div class="row" style="margin-top:14px"><b class="grow">Startelf ${start.length}/11</b><button class="btn sm" data-a="pickStart" data-id="${esc(id)}">Startelf wählen</button></div>
+    <div class="row" style="margin-top:14px"><b class="grow">Startelf ${start.length}/11</b><button class="btn sm" data-a="pickStart" data-id="${esc(id)}">Aufstellen</button></div>
     <div style="margin-top:6px">${start.map(p => `<span class="pill">${esc(playerName(p))}</span>`).join('') || '<span class="mute small">Noch keine Startelf.</span>'}</div>
     ${warn.length ? `<div class="warnbox">Drittes wichtiges Spiel in Folge in der Startelf: ${warn.map(p => esc(playerName(p))).join(', ')}</div>` : ''}
     ${g.important ? '' : '<div class="tiny mute" style="margin-top:8px">Tipp: Markiere wichtige Spiele, dann warnt die App, wenn jemand drei wichtige Spiele hintereinander beginnt.</div>'}</div>`;
@@ -738,8 +877,6 @@ function viewGame(id) {
   }
   h += c + (grp !== null ? '</div>' : '') + '</div>';
 
-  const dc = s.dresscode || {};
-  if (Object.keys(dc).length) h += sec('Dresscode') + `<div class="card"><dl class="kv">${Object.entries(dc).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>`;
   if (club || contacts.length) {
     h += sec('Gegner');
     h += `<div class="card">${club ? `<div class="li" data-a="openClub" data-id="${esc(club.id)}"><div class="grow"><div class="t">${esc(club.name)}</div><div class="s">${esc([club.stadt, club.verband].filter(Boolean).join(' · '))}</div></div>${icon('chev', 'chev')}</div>` : ''}
@@ -755,20 +892,6 @@ function viewGame(id) {
   h += `<div class="card"><div class="f" style="margin:0"><textarea data-a="gameField" data-id="${esc(id)}" data-f="review" placeholder="Was lief gut? Was nehmen wir mit ins Training?">${esc(g.review || '')}</textarea></div></div>`;
   return { title: g.opponent || 'Spiel', back: true, html: h };
 }
-function resultForm(g) {
-  const r = parseResult(g.result) || ['', ''];
-  openForm({
-    title: `Ergebnis · ${g.opponent}`, value: { us: r[0], them: r[1] },
-    top: `<div class="small mute" style="margin-bottom:12px">${D.long(g.date)} · ${g.ha === 'A' ? 'auswärts' : g.ha === 'H' ? 'zuhause' : ''} – aus unserer Sicht</div>`,
-    fields: [[{ k: 'us', l: 'FC Hennef', t: 'number' }, { k: 'them', l: shortOpp(g.opponent), t: 'number' }],
-      { k: 'cancelled', l: 'Spiel ist ausgefallen / abgesagt', t: 'toggle' }],
-    onSave: async v => {
-      if (v.cancelled) { Store.patch(g.id, 'game', { cancelled: true, result: '' }); }
-      else { if (v.us === '' || v.them === '') return toast('Bitte beide Tore eintragen'); Store.patch(g.id, 'game', { result: `${v.us}:${v.them}`, cancelled: false }); }
-      await Sheet.close(); toast('Gespeichert'); render();
-    },
-  });
-}
 function gameForm(g = {}, isNew) {
   openForm({
     title: isNew ? 'Neues Spiel' : 'Spieldaten', value: g,
@@ -778,7 +901,8 @@ function gameForm(g = {}, isNew) {
       [{ k: 'meet', l: 'Treffen', t: 'time' }, { k: 'result', l: 'Ergebnis (wir : Gegner)', ph: 'z. B. 3:1' }],
       { k: 'ha', l: 'Heim / Auswärts', t: 'seg', opts: [['H', 'Heim'], ['A', 'Auswärts'], ['', 'offen']] },
       { k: 'type', l: 'Art', t: 'seg', opts: GTYPES.map(x => [x, x]) },
-      { k: 'venue', l: 'Ort / Platz' },
+      [{ k: 'venue', l: 'Ort / Platz' }, { k: 'place', l: 'Platzierung (LV/Turnier)', t: 'number' }],
+      { k: 'kit', l: 'Trikots', t: 'seg', opts: [['rot', 'rot'], ['schwarz', 'schwarz'], ['', 'offen']] },
       { k: 'important', l: 'Wichtiges Spiel', t: 'toggle' },
       { k: 'cancelled', l: 'Spiel abgesagt', t: 'toggle' },
       { k: 'tentative', l: 'Tag steht noch nicht fest', t: 'toggle' },
@@ -803,12 +927,12 @@ function posChips(p, max = 6) {
 }
 const posText = p => Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1]).map(([k, l]) => (posvOf(k)?.l || k) + (l === 2 ? '?' : '')).join(' ');
 function viewKader(parts) {
-  const sub = parts[0] || 'feld';
-  let h = `<div class="seg">${[['feld', 'Feld'], ['tiers', 'Tiers'], ['positionen', 'Positionen'], ['liste', 'Liste']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/kader/${v}">${l}</button>`).join('')}</div>`;
-  if (sub === 'tiers') h += tierBoard();
+  const sub = parts[0] || 'tiers';
+  let h = `<div class="seg">${[['tiers', 'Tiers'], ['positionen', 'Positionen'], ['feld', 'Feld'], ['liste', 'Liste']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/kader/${v}">${l}</button>`).join('')}</div>`;
+  if (sub === 'feld') h += pitchView();
   else if (sub === 'positionen') h += posMatrix();
   else if (sub === 'liste') h += kaderListe();
-  else h += pitchView();
+  else h += tierBoard();
   return { title: 'Kader & Mannschaft', html: h, fab: sub === 'liste' || sub === 'tiers' ? 'newPlayer' : null };
 }
 const tierLegend = () => `<div class="legend" style="margin:8px 4px 2px">${TIERS.slice(0, 4).map(t => `<span><span class="dot" style="background:${t.c};width:9px;height:9px"></span> ${esc(t.l)}</span>`).join('')}
@@ -877,12 +1001,11 @@ function quickTier(id) {
 }
 function posMatrix() {
   const ps = players().sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || tierIdx(a) - tierIdx(b) || byName(a, b));
-  return `<div class="small mute" style="margin:0 4px 8px">Zelle antippen: – → <b>S</b> (Stamm) → <b>F</b> (in Frage) → –. Wird sofort gespeichert.</div>
-    <div class="matrix"><table><thead><tr><th></th>${POSV.map(P => `<th title="${esc(P.f)}">${esc(P.l)}</th>`).join('')}</tr></thead><tbody>
+  return `<div class="matrix"><table><thead><tr><th></th>${POSV.map(P => `<th title="${esc(P.f)}">${esc(P.l)}</th>`).join('')}</tr></thead><tbody>
     ${ps.map(p => `<tr><th><span class="dot" style="background:${tierOf(p.tier).c};width:8px;height:8px"></span> ${esc(p.short || p.name)}</th>${POSV.map(P => {
       const lv = (p.posv || {})[P.k] || 0, e = effTier(p, P.k), t = e && e.tier ? tierOf(e.tier) : null;
-      return `<td class="mx l${lv}" data-a="mxCycle" data-id="${esc(p.id)}" data-k="${P.k}" style="${t ? `--tc:${t.c};--tb:${t.bg}` : ''}">${lv === 1 ? 'S' : lv === 2 ? 'F' : ''}</td>`;
-    }).join('')}</tr>`).join('')}</tbody></table></div>${tierLegend()}`;
+      return `<td class="mx l${lv}" data-a="mxCycle" data-id="${esc(p.id)}" data-k="${P.k}" style="${t ? `--tc:${t.c};--tb:${t.bg}` : ''}" title="${esc(P.f)}${lv ? ' · ' + POSVLV[lv] : ''}"></td>`;
+    }).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 function kaderListe() {
   const f = UI.kader;
@@ -972,13 +1095,139 @@ document.addEventListener('touchmove', e => {
 document.addEventListener('touchend', e => { if (Drag.active) { const t = e.changedTouches[0]; dragEnd(true, t.clientX, t.clientY); } });
 document.addEventListener('contextmenu', e => { if (e.target.closest('[data-drag]')) e.preventDefault(); });
 // ───────────────────────── Training ─────────────────────────
+// ───────────── Training: Trainingsphasen, Zeitplan, Periodisierung, Lexikon (Version 1.3) ─────────────
+const TPH = [{ k: 'akt', l: 'Aktivierung', c: '#db2777' }, { k: 'uebung', l: 'Übungsform', c: '#2563eb' }, { k: 'spiel', l: 'Spielform', c: '#16a34a' }, { k: 'abschluss', l: 'Abschluss', c: '#ea580c' }];
+const TPH_OPT = [{ k: 'ath', l: 'Athletik', c: '#0891b2' }, { k: 'extra', l: 'Extra-Training', c: '#7c3aed' }, { k: 'video', l: 'Videoanalyse', c: '#64748b' }];
+const tphOf = k => [...TPH, ...TPH_OPT].find(x => x.k === k) || { k, l: k, c: '#94a3b8' };
+// Schwerpunkt einer Übung: Spielphasen + Aktivierung
+const FOCUS = { ...Object.fromEntries(GP5.map(k => [k, GP[k]])), AKT: { s: 'AKT', l: 'Aktivierung', c: '#db2777' } };
+const focusBadge = k => FOCUS[k] ? badge(FOCUS[k].s, FOCUS[k].c) : '';
+function dayBlocks(dd) {
+  if (Array.isArray(dd.blocks)) return dd.blocks;
+  const b = TPH.map(t => ({ k: t.k, items: [] }));
+  if ((dd.exercises || []).length) b[1].items = dd.exercises.map(id => ({ id, min: '' }));
+  if ((dd.athletics || []).length) b.push({ k: 'ath', items: dd.athletics.map(id => ({ id, min: '' })) });
+  return b;
+}
+const blockMin = b => (b.items || []).reduce((s, it) => s + (+it.min || 0), 0) + (+b.min || 0);
+const blocksCopy = (k, d) => JSON.parse(JSON.stringify(dayBlocks(((weekData(k).days || {})[d]) || {})));
+function saveBlocks(key, d, blocks) {
+  const ex = [], ath = [];
+  for (const b of blocks) for (const it of b.items || []) (b.k === 'ath' ? ath : ex).push(it.id);
+  setDay(key, d, { blocks, exercises: [...new Set(ex)], athletics: [...new Set(ath)] });
+}
+function trainingDur(dd) { return +dd.duration || +setting().trainDuration || 90; }
+function dayPlan(key, d, dd) {
+  const blocks = dayBlocks(dd), total = blocks.reduce((s, b) => s + blockMin(b), 0), dur = trainingDur(dd);
+  const st = total < dur ? 'under' : total === dur ? 'exact' : 'over';
+  let h = '';
+  blocks.forEach((b, i) => {
+    const T = tphOf(b.k), opt = TPH_OPT.some(x => x.k === b.k);
+    const attrs = `data-week="${key}" data-day="${d}" data-b="${i}"`;
+    h += `<div class="blk" style="--bc:${T.c}"><div class="blk-h">
+      <span class="blk-t">${esc(T.l)}</span><span class="blk-m">${blockMin(b) ? blockMin(b) + ' Min' : ''}</span>
+      <button class="iconbtn" data-a="blkMove" ${attrs} data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Nach oben">${icon('up')}</button>
+      <button class="iconbtn" data-a="blkMove" ${attrs} data-d="1" ${i === blocks.length - 1 ? 'disabled' : ''} aria-label="Nach unten">${icon('down')}</button>
+      ${opt ? `<button class="iconbtn" data-a="blkDel" ${attrs} aria-label="Phase entfernen">${icon('trash')}</button>` : ''}</div>`;
+    if (b.k === 'video') {
+      h += `<div class="blk-row"><input type="text" class="blk-text" data-a="blkText" ${attrs} value="${esc(b.text || '')}" placeholder="Was schauen wir uns an?"><label class="minf"><input type="number" min="0" inputmode="numeric" data-a="blkMin" ${attrs} value="${esc(b.min || '')}"><span>Min</span></label></div>`;
+    } else {
+      for (const [j, it] of (b.items || []).entries()) {
+        const x = Store.get(it.id); if (!x) continue;
+        h += `<div class="blk-row"><span class="blk-n" data-a="${b.k === 'ath' ? 'athOpen' : 'exOpen'}" data-id="${esc(it.id)}">${esc(b.k === 'ath' ? x.name : exName(x))}</span>
+          <label class="minf"><input type="number" min="0" inputmode="numeric" data-a="itemMin" ${attrs} data-i="${j}" value="${esc(it.min || '')}"><span>Min</span></label>
+          <button class="iconbtn x" data-a="itemDel" ${attrs} data-i="${j}" aria-label="Entfernen">×</button></div>`;
+      }
+      h += `<button class="link blk-add" data-a="blkPick" ${attrs}>+ ${b.k === 'ath' ? 'Athletikübung' : 'Übung'}</button>`;
+    }
+    h += `</div>`;
+  });
+  const missing = TPH_OPT.filter(o => !blocks.some(b => b.k === o.k));
+  if (missing.length) h += `<div class="blk-opt">${missing.map(o => `<button class="chip" data-a="blkAdd" data-week="${key}" data-day="${d}" data-k="${o.k}">+ ${esc(o.l)}</button>`).join('')}</div>`;
+  h += `<div class="timebar ${st}"><span>Zeit</span><b>${total}</b><span>von</span><label class="minf"><input type="number" min="0" inputmode="numeric" data-a="dayDur" data-week="${key}" data-day="${d}" value="${dur}"><span>Min</span></label>
+    <span class="grow tb-msg">${st === 'exact' ? 'passt genau' : st === 'over' ? (total - dur) + ' Min zu viel' : (dur - total) + ' Min frei'}</span></div>`;
+  return h;
+}
+function blockPick(key, d, i) {
+  const blocks = blocksCopy(key, d), b = blocks[i], sel = (b.items || []).map(x => x.id);
+  const w = weekData(key), n = UI.ex.n || setting().exPlayers || 16, ph = w.phase;
+  let opts;
+  if (b.k === 'ath') opts = Store.all('athletic').sort(byOrder).map(a => ({ v: a.id, l: a.name, g: a.cat + (a.sub ? ' · ' + a.sub : ''), s: [a.area, a.dist, a.reps].filter(Boolean).join(' · ') }));
+  else {
+    const match = e => b.k === 'extra' || (e.tphases || []).includes(b.k);
+    const rank = e => match(e) ? 0 : !(e.tphases || []).length ? 1 : 2;
+    opts = Store.all('exercise').filter(e => rank(e) < 2 || sel.includes(e.id))
+      .sort((a, c) => rank(a) - rank(c) || ((c.phases || []).includes(ph) - (a.phases || []).includes(ph)) || (((c.fit || {})[n] || 0) - ((a.fit || {})[n] || 0)) || byName(a, c))
+      .map(e => ({ v: e.id, l: exName(e), g: rank(e) === 0 ? (b.k === 'extra' ? 'Alle Übungen' : tphOf(b.k).l) : 'Noch keiner Trainingsphase zugeordnet', s: [(e.phases || []).map(k => FOCUS[k]?.s).filter(Boolean).join(' '), e.intensity && 'Intensität ' + e.intensity, fitRange(e)].filter(Boolean).join(' · '), r: `<span class="fitb fit${(e.fit || {})[n] || 0}">${n}: ${FITL[(e.fit || {})[n] || 0]}</span>` }));
+  }
+  openForm({
+    title: `${tphOf(b.k).l} · Übungen`, value: { sel }, fields: [{ k: 'sel', t: 'multi', opts }], saveLabel: 'Übernehmen',
+    onSave: async v => {
+      const old = Object.fromEntries((b.items || []).map(x => [x.id, x]));
+      blocks[i] = { ...b, items: v.sel.map(id => old[id] || { id, min: '' }) };
+      saveBlocks(key, d, blocks); await Sheet.close(); render();
+    },
+  });
+}
+// Periodisierung: alle Wochen der Saison, Schwerpunkt je Woche, Spiele daneben
+function distBar(keys) {
+  const cnt = {}; let total = 0;
+  for (const k of keys) { const ph = weekData(k).phase; if (GP[ph] && ph !== 'FREI') { cnt[ph] = (cnt[ph] || 0) + 1; total++; } }
+  if (!total) return `<div class="tiny mute">Noch keine Woche mit Schwerpunkt.</div>`;
+  const ks = Object.keys(GP).filter(k => cnt[k]);
+  return `<div class="distbar">${ks.map(k => `<i style="width:${cnt[k] / total * 100}%;background:${GP[k].c}"></i>`).join('')}</div>
+    <div class="legend">${ks.map(k => `<span><span class="dot" style="background:${GP[k].c};width:8px;height:8px"></span> ${esc(GP[k].s)} ${cnt[k]}× · ${Math.round(cnt[k] / total * 100)}%</span>`).join('')}</div>`;
+}
+function periodView() {
+  const ps = phases(), curKey = D.week(D.today()).key;
+  if (!ps.length) return '<div class="empty">Noch keine Saisonphasen angelegt.</div>';
+  const allKeys = [...new Set(ps.flatMap(p => weeksOf(p).map(w => w.key)))];
+  let h = `<div class="card"><h3>Schwerpunkte der ganzen Saison</h3>${distBar(allKeys)}
+    <div class="tiny mute" style="margin-top:6px">Schwerpunkt antippen, um ihn für die Woche festzulegen. Die Woche selbst antippen, um das Training zu planen.</div></div>`;
+  for (const p of ps) {
+    const ws = weeksOf(p);
+    h += `<div class="pmeso" style="--pc:${PHC[p.type]}"><div class="pm-h"><b>${esc(p.label)}</b> <span>${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></div>${distBar(ws.map(w => w.key))}</div>`;
+    h += `<div class="card list pweeks">`;
+    for (const w of ws) {
+      const ph = GP[weekData(w.key).phase], games = weekGames(w.key);
+      h += `<div class="pw ${w.key === curKey ? 'now' : ''}" ${w.key === curKey ? 'id="pw-now"' : ''}>
+        <button class="pw-ph ${ph ? 'set' : ''}" style="--c:${ph ? ph.c : 'var(--line)'}" data-a="phasePick" data-week="${w.key}" aria-label="Schwerpunkt wählen">${ph ? esc(ph.s) : '+'}</button>
+        <div class="grow pw-mid" data-a="open" data-h="#/training/woche/${w.key}"><div class="pw-kw">KW ${w.week}${w.key === curKey ? ' <span class="todaytag">jetzt</span>' : ''}</div><div class="tiny mute">${D.short(w.monday)}–${D.short(D.add(w.monday, 6))}${ph ? ' · ' + esc(ph.l) : ''}</div></div>
+        <div class="pw-games">${games.map(g => { const o = outcome(g); return `<span class="pwg ${o ? 'o' + o : ''} ${g.cancelled ? 'cx' : ''}" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}" title="${esc(g.opponent)}"><b>${D.wd(g.date)}</b> ${esc(shortOpp(g.opponent).slice(0, 14))}${g.type ? ` <i>${esc(g.type)}</i>` : ''}</span>`; }).join('')}</div></div>`;
+    }
+    h += `</div>`;
+  }
+  return h;
+}
+// Lexikon: Mannschaftstaktik · Individualtaktik & -technik · Athletik
+const TEAMCATS = ['Gruppentaktik', 'Mannschaftstaktik'];
+const topicArea = t => TEAMCATS.includes(t.cat) ? 'team' : 'indiv';
+const LEXAREAS = [['team', 'Mannschaftstaktik'], ['indiv', 'Individualtaktik & -technik'], ['athletik', 'Athletik']];
+function lexikonView(area) {
+  area = LEXAREAS.some(a => a[0] === area) ? area : 'team';
+  let h = `<div class="seg sub3">${LEXAREAS.map(([v, l]) => `<button class="${area === v ? 'on' : ''}" data-a="open" data-h="#/training/lexikon/${v}">${l}</button>`).join('')}</div>`;
+  if (area === 'athletik') return h + athleticList();
+  const f = UI.topics, use = topicUse();
+  let ts = Store.all('topic').filter(t => topicArea(t) === area).sort(byOrder);
+  if (f.ph) ts = ts.filter(t => (t.phases || []).includes(f.ph) || (t.phases || []).includes('ALL'));
+  h += chips([['', 'Alle'], ...GP5.map(k => [k, gpS(k)])], f.ph, 'topPh');
+  const cats = area === 'team' ? TEAMCATS : TOPICCATS.filter(c => !TEAMCATS.includes(c));
+  for (const cat of cats) {
+    const list = ts.filter(t => t.cat === cat); if (!list.length) continue;
+    h += sec(cat) + `<div class="card">${list.map(t => `<span class="topicchip" data-a="editTopic" data-id="${esc(t.id)}">${(t.phases || []).filter(p => p !== 'ALL').map(p => `<span class="dot" style="background:${GP[p]?.c};width:7px;height:7px"></span>`).join('')}${esc(t.title)}${use[t.id] ? ` <span class="n">${use[t.id]}×</span>` : ''}</span>`).join('')}</div>`;
+  }
+  if (!ts.length) h += '<div class="empty">Keine Themen in dieser Auswahl.</div>';
+  return h;
+}
 function viewTraining(parts) {
-  const sub = parts[0] || 'woche';
-  let h = `<div class="seg">${[['woche', 'Woche'], ['uebungen', 'Übungen'], ['athletik', 'Athletik'], ['themen', 'Themen']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/training/${v}">${l}</button>`).join('')}</div>`;
+  let sub = parts[0] || 'woche';
+  if (sub === 'athletik') { parts = ['lexikon', 'athletik']; sub = 'lexikon'; }
+  if (sub === 'themen') { parts = ['lexikon', 'team']; sub = 'lexikon'; }
+  let h = `<div class="seg">${[['woche', 'Woche'], ['periodisierung', 'Periodisierung'], ['uebungen', 'Übungen'], ['lexikon', 'Lexikon']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/training/${v}">${l}</button>`).join('')}</div>`;
   let fab = null;
   if (sub === 'uebungen') { h += exerciseList(); fab = 'newExercise'; }
-  else if (sub === 'athletik') { h += athleticList(); fab = 'newAthletic'; }
-  else if (sub === 'themen') { h += topicList(); fab = 'newTopic'; }
+  else if (sub === 'periodisierung') { h += periodView(); setTimeout(() => { const n = document.getElementById('pw-now'); if (n && !periodView._done) { periodView._done = true; n.scrollIntoView({ block: 'center' }); } }, 30); }
+  else if (sub === 'lexikon') { h += lexikonView(parts[1]); fab = parts[1] === 'athletik' ? 'newAthletic' : 'newTopic'; UI.lexArea = parts[1] || 'team'; }
   else h += trainingWeek(parts[1] || D.week(D.today()).key);
   return { title: 'Training', html: h, fab };
 }
@@ -1011,10 +1260,7 @@ function trainingWeek(key) {
       ${'' + `
       <div class="sub"><span class="grow">Schwerpunkte</span><button class="link" data-a="pickDay" data-what="topics" data-week="${key}" data-day="${d}">+ wählen</button></div>
       <div>${tops.map(t => `<span class="topicchip">${esc(t.title)}</span>`).join('') || '<span class="tiny mute">Aus dem Periodisierungsplan wählen</span>'}</div>
-      <div class="sub"><span class="grow">Übungen</span><button class="link" data-a="pickDay" data-what="exercises" data-week="${key}" data-day="${d}">+ wählen</button></div>
-      ${exs.map(e => `<div class="li" data-a="exOpen" data-id="${esc(e.id)}" style="padding:7px 0"><div class="grow small"><b>${esc(exName(e))}</b> <span class="mute">${esc([e.diff, e.intensity].filter(Boolean).join(' · '))}</span></div>${icon('chev', 'chev')}</div>`).join('') || '<div class="tiny mute">Aus dem Übungsportfolio wählen</div>'}
-      <div class="sub"><span class="grow">Athletik</span><button class="link" data-a="pickDay" data-what="athletics" data-week="${key}" data-day="${d}">+ wählen</button></div>
-      ${aths.map(a => `<div class="li" data-a="athOpen" data-id="${esc(a.id)}" style="padding:7px 0"><div class="grow small"><b>${esc(a.name)}</b> <span class="mute">${esc([a.dist, a.reps].filter(Boolean).join(' · '))}</span></div>${icon('chev', 'chev')}</div>`).join('') || '<div class="tiny mute">Aus dem Athletikportfolio wählen</div>'}`}
+      <div class="sub"><span class="grow">Ablauf</span></div>${dayPlan(key, d, dd)}`}
       <div class="f" style="margin:10px 0 0"><textarea data-a="dayNote" data-week="${key}" data-day="${d}" placeholder="Notiz zum Training…" style="min-height:52px">${esc(dd.note || '')}</textarea></div></div>`;
   }
   h += `<div class="tiny mute" style="margin:4px">Trainingstage änderst du über das Wappen oben rechts → Einstellungen.</div>`;
@@ -1029,19 +1275,21 @@ function exerciseList() {
   if (f.diff) ex = ex.filter(e => e.diff === f.diff);
   if (f.int) ex = ex.filter(e => e.intensity === f.int);
   if (f.ph) ex = ex.filter(e => (e.phases || []).includes(f.ph));
+  if (f.tph) ex = ex.filter(e => f.tph === '-' ? !(e.tphases || []).length : (e.tphases || []).includes(f.tph));
   if (f.q) ex = ex.filter(e => (exName(e) + ' ' + (e.expl || '')).toLowerCase().includes(f.q));
   const fit = e => (e.fit || {})[f.n] || 0;
   const sorts = { fit: (a, b) => fit(b) - fit(a) || byName(a, b), name: byName, diff: (a, b) => lv(a.diff) - lv(b.diff), int: (a, b) => lv(b.intensity) - lv(a.intensity), rating: (a, b) => (b.rating || 0) - (a.rating || 0) };
   ex.sort(sorts[f.sort] || sorts.fit);
   if (f.sort === 'fit' && f.onlyFit) ex = ex.filter(e => fit(e) > 0);
   let h = `<input class="search" type="search" placeholder="Übung suchen…" value="${esc(f.q)}" data-a="exQ"><div id="results">
-    <div class="filters"><div class="stepper"><button data-a="exN" data-d="-1">−</button><b>${f.n}</b><button data-a="exN" data-d="1">+</button></div><span class="small mute">Feldspieler</span>
+    <div class="filters"><div class="stepper" title="Feldspieler" aria-label="Feldspieler"><button data-a="exN" data-d="-1" aria-label="Weniger Feldspieler">−</button><b>${f.n}</b><button data-a="exN" data-d="1" aria-label="Mehr Feldspieler">+</button></div>
     <select data-a="exSel" data-f="sort"><option value="fit" ${f.sort === 'fit' ? 'selected' : ''}>Passend zuerst</option><option value="name" ${f.sort === 'name' ? 'selected' : ''}>Name</option><option value="diff" ${f.sort === 'diff' ? 'selected' : ''}>Schwierigkeit ↑</option><option value="int" ${f.sort === 'int' ? 'selected' : ''}>Intensität ↓</option><option value="rating" ${f.sort === 'rating' ? 'selected' : ''}>Bewertung</option></select></div>
     <div class="filters"><select data-a="exSel" data-f="diff"><option value="">Schwierigkeit: alle</option>${LVL3.map(x => `<option ${f.diff === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
     <select data-a="exSel" data-f="int"><option value="">Intensität: alle</option>${LVL3.map(x => `<option ${f.int === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
-    <select data-a="exSel" data-f="ph"><option value="">Spielphase: alle</option>${GP5.map(k => `<option value="${k}" ${f.ph === k ? 'selected' : ''}>${GP[k].s} · ${GP[k].l}</option>`).join('')}</select></div>`;
+    <select data-a="exSel" data-f="ph"><option value="">Schwerpunkt: alle</option>${Object.entries(FOCUS).map(([k, v]) => `<option value="${k}" ${f.ph === k ? 'selected' : ''}>${v.s} · ${v.l}</option>`).join('')}</select>
+    <select data-a="exSel" data-f="tph"><option value="">Trainingsphase: alle</option>${TPH.map(t => `<option value="${t.k}" ${f.tph === t.k ? 'selected' : ''}>${t.l}</option>`).join('')}<option value="-" ${f.tph === '-' ? 'selected' : ''}>noch nicht zugeordnet</option></select></div>`;
   h += `<div class="card list">${ex.map(e => { const s = fit(e); return `<div class="li" data-a="exOpen" data-id="${esc(e.id)}"><div class="grow"><div class="t">${esc(exName(e))}</div>
-    <div class="badges">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(gpS(k), GP[k]?.c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
+    <div class="badges">${(e.tphases || []).map(k => badge(tphOf(k).l, tphOf(k).c)).join('')}${(e.phases || []).map(focusBadge).join('')}${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
     <div class="tiny mute" style="margin-top:4px">${esc(fitRange(e) || 'Spielerzahl nicht hinterlegt')}</div></div><span class="fitb fit${s}">${FITL[s]}</span></div>`; }).join('') || '<div class="empty">Keine Übungen gefunden.</div>'}</div></div>`;
   return h;
 }
@@ -1050,7 +1298,8 @@ function exerciseDetail(id) {
   const rows = [['Erklärung', e.expl], ['Aufbau', e.setup], ['Material', e.material], ['Vorteile', e.pros], ['Nachteile', e.cons], ['Variationen', e.variations], ['Vorteile der Variation', e.varPros], ['Nachteile der Variation', e.varCons]].filter(x => x[1]);
   let fitg = ''; for (let n = 1; n <= 21; n++) { const s = (e.fit || {})[n] || 0; fitg += `<span class="fitb fit${s}" style="text-align:center">${n}</span>`; }
   const plannedIn = Store.all('week').filter(w => Object.values(w.days || {}).some(d => (d.exercises || []).includes(id))).length;
-  Sheet.open(exName(e), `<div class="badges" style="margin-top:0">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(GP[k].s + ' · ' + GP[k].l, GP[k].c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
+  void plannedIn;
+  Sheet.open(exName(e), `<div class="badges" style="margin-top:0">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.tphases || []).map(k => badge(tphOf(k).l, tphOf(k).c)).join('')}${(e.phases || []).filter(k => FOCUS[k]).map(k => badge(FOCUS[k].s + ' · ' + FOCUS[k].l, FOCUS[k].c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
     <div class="sub" style="margin-top:14px">Feldspieler (grün = ideal, hell = möglich)</div><div class="fitgrid">${fitg}</div>
     ${rows.length ? `<dl class="kv" style="margin-top:14px">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '<div class="mute small" style="margin-top:14px">Noch keine Beschreibung – über „Bearbeiten“ ergänzen.</div>'}
     ${e.link ? `<p><a class="link" href="${esc(e.link)}" target="_blank" rel="noopener">${icon('link')} Video / Link öffnen</a></p>` : ''}
@@ -1061,7 +1310,8 @@ function exerciseForm(e = {}, isNew) {
   openForm({
     title: isNew ? 'Neue Übung' : 'Übung bearbeiten', value: e,
     fields: [[{ k: 'name', l: 'Name', auto: isNew }, { k: 'variant', l: 'Variante (z. B. 1, 2)' }],
-      { k: 'phases', l: 'Spielphasen', t: 'chips', opts: GP5.map(k => [k, GP[k].s + ' · ' + GP[k].l]) },
+      { k: 'tphases', l: 'Trainingsphase (wo wird die Übung eingesetzt?)', t: 'chips', opts: TPH.map(t => [t.k, t.l]) },
+      { k: 'phases', l: 'Schwerpunkt (was trainiert die Übung?)', t: 'chips', opts: Object.entries(FOCUS).map(([k, v]) => [k, v.s + ' · ' + v.l]) },
       { k: 'expl', l: 'Erklärung', t: 'textarea' }, { k: 'fit', l: 'Passt für … Feldspieler', t: 'fit' },
       { k: 'diff', l: 'Schwierigkeit', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
       { k: 'intensity', l: 'Intensität', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
@@ -1135,8 +1385,8 @@ function topicList() {
 }
 function topicForm(t = {}, isNew) {
   openForm({
-    title: isNew ? 'Neues Thema' : 'Thema', value: { cat: 'Gruppentaktik', phases: UI.topics.ph ? [UI.topics.ph] : [], ...t },
-    fields: [{ k: 'title', l: 'Thema', auto: isNew }, { k: 'cat', l: 'Kategorie', t: 'select', opts: TOPICCATS.map(c => [c, c]) },
+    title: isNew ? 'Neues Thema' : 'Thema', value: { cat: UI.lexArea === 'indiv' ? 'Individualtaktik & Technik' : 'Gruppentaktik', phases: UI.topics.ph ? [UI.topics.ph] : [], ...t },
+    fields: [{ k: 'title', l: 'Thema', auto: isNew }, { k: 'cat', l: 'Kategorie', t: 'select', opts: TOPICCATS.map(c => [c, (TEAMCATS.includes(c) ? 'Mannschaftstaktik · ' : 'Individualtaktik & -technik · ') + c]) },
       { k: 'phases', l: 'Spielphasen', t: 'chips', opts: [...GP5.map(k => [k, GP[k].s + ' · ' + GP[k].l]), ['ALL', 'alle Phasen']] }],
     onSave: async v => { if (!v.title) return toast('Bitte einen Titel eingeben'); Store.put(t.id || uid('topic'), 'topic', { ...(t.id ? Store.data(t.id) : { order: 999 }), ...v }); await Sheet.close(); render(); },
     onDelete: isNew ? null : async () => { if (!confirmDel('Thema')) return; Store.remove(t.id); await Sheet.close(); render(); },
@@ -1180,29 +1430,29 @@ function sameClub(a, b) {
 }
 const findClub = name => name ? Store.all('club').find(c => normC(c.name) === normC(name)) || Store.all('club').find(c => sameClub(c.name, name)) : null;
 const contactsFor = name => name ? Store.all('contact').filter(c => c.club && sameClub(c.club, name)) : [];
+const clubStatus = c => c.status || (c.done ? 'fix' : (c.requested || c.callback) ? 'pending' : 'none');
 const TSTATUS = [
-  { k: 'callback', l: 'Zurückmelden', d: 'Hier müssen wir uns melden', c: '#d97706', f: c => c.callback && !c.done },
-  { k: 'open', l: 'Noch nicht angefragt', d: 'Kandidaten für die nächste Anfrage', c: '#5b4a8f', f: c => !c.requested && !c.callback && !c.done },
-  { k: 'requested', l: 'Angefragt – warten auf Antwort', d: '', c: '#0e7490', f: c => c.requested && !c.callback && !c.done },
-  { k: 'done', l: 'Vereinbart', d: '', c: '#15803d', f: c => c.done }];
+  { k: 'none', l: 'Nicht angefragt', s: 'offen', d: 'Kandidaten für die nächste Anfrage', c: '#5b4a8f' },
+  { k: 'pending', l: 'Keine Rückmeldung', s: 'wartet', d: 'Angefragt – Antwort steht noch aus', c: '#d97706' },
+  { k: 'fix', l: 'Fix', s: 'fix', d: 'Testspiel steht', c: '#15803d' }];
 const LVC = { NLZ: '#312e81', Regio: '#7c3aed', VL: '#0e7490', BZL: '#15803d', SDL: '#a16207', '': '#94a3b8' };
 const lvlRank = k => { const i = LEVELS.findIndex(l => l.k === (k || '')); return i < 0 ? 99 : i; };
 function viewTests() {
   const f = UI.tests; if (!(f.lvls instanceof Set)) f.lvls = new Set();
+  if (!['', 'none', 'pending', 'fix'].includes(f.st)) f.st = '';
   let cl = Store.all('club');
-  const all = cl.length;
   if (f.q) cl = cl.filter(c => (c.name + ' ' + c.stadt + ' ' + c.kreis + ' ' + c.trainer).toLowerCase().includes(f.q));
   if (f.lvls.size) cl = cl.filter(c => f.lvls.has(c.level || ''));
   cl.sort((a, b) => lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
   const tg = Store.all('game').filter(g => g.type === 'Test' && !g.cancelled && g.date >= D.today()).sort(byDate);
   let h = `<div class="linkrow" data-a="gTest">${icon('spiele', 'mini')}<span class="grow">Testspiele im Spielplan${tg.length ? ` · nächstes: <b>${esc(shortOpp(tg[0].opponent))}</b> ${D.short(tg[0].date)}` : ' · keins geplant'}</span>${icon('chev', 'chev')}</div>
     <input class="search" type="search" placeholder="Verein, Stadt, Kreis suchen…" value="${esc(f.q)}" data-a="tQ"><div id="results">`;
-  h += `<div class="chips wrapchips"><button class="chip ${f.lvls.size ? '' : 'on'}" data-a="tLvl" data-v="*">Alle Niveaus (${all})</button>${LEVELS.filter(l => l.k).map(l => `<button class="chip ${f.lvls.has(l.k) ? 'on' : ''}" data-a="tLvl" data-v="${l.k}">${esc(l.k)}</button>`).join('')}</div>`;
-  h += chips([['', 'Jeder Status'], ...TSTATUS.map(s => [s.k, s.l.split(' –')[0]])], f.st, 'tSt');
+  h += `<div class="chips wrapchips"><button class="chip blank ${f.lvls.size ? '' : 'on'}" data-a="tLvl" data-v="*" aria-label="Alle Niveaus" title="Alle Niveaus"></button>${LEVELS.filter(l => l.k).map(l => `<button class="chip ${f.lvls.has(l.k) ? 'on' : ''}" data-a="tLvl" data-v="${l.k}">${esc(l.k)}</button>`).join('')}</div>`;
+  h += `<div class="chips wrapchips"><button class="chip blank ${f.st ? '' : 'on'}" data-a="tSt" data-v="" aria-label="Jeder Status" title="Jeder Status"></button>${TSTATUS.map(s => `<button class="chip ${f.st === s.k ? 'on' : ''}" data-a="tSt" data-v="${s.k}">${esc(s.l)}</button>`).join('')}</div>`;
   for (const S of TSTATUS) {
     if (f.st && f.st !== S.k) continue;
-    const list = cl.filter(S.f); if (!list.length) continue;
-    h += `<div class="sec"><span class="dot" style="background:${S.c}"></span><span class="grow">${esc(S.l)} · ${list.length}</span></div>${S.d ? `<div class="tiny mute" style="margin:-4px 4px 6px">${esc(S.d)}</div>` : ''}
+    const list = cl.filter(c => clubStatus(c) === S.k); if (!list.length) continue;
+    h += `<div class="sec"><span class="dot" style="background:${S.c}"></span><span class="grow">${esc(S.l)} · ${list.length}</span></div><div class="tiny mute" style="margin:-4px 4px 6px">${esc(S.d)}</div>
       <div class="ctiles">${list.map(clubTile).join('')}</div>`;
   }
   if (!cl.length) h += '<div class="empty">Keine Vereine für diese Auswahl.</div>';
@@ -1210,17 +1460,66 @@ function viewTests() {
   return { title: 'Testspielplanung', html: h, fab: 'newClub' };
 }
 function clubTile(c) {
-  const n = contactsFor(c.name).length, L = LEVELS.find(l => l.k === (c.level || ''));
+  const n = contactsFor(c.name).length, L = LEVELS.find(l => l.k === (c.level || '')), st = clubStatus(c);
   const g = Store.all('game').filter(x => !x.cancelled && x.date >= D.today() && sameClub(x.opponent, c.name)).sort(byDate)[0];
   return `<div class="ctile" data-a="openClub" data-id="${esc(c.id)}" style="--lc:${LVC[c.level || '']}">
     <div class="row" style="gap:6px"><span class="lvb">${esc(c.level || '–')}</span>${n ? `<span class="tiny mute">${icon('phone', 'mini')}${n}</span>` : ''}${c.result ? `<span class="tiny" style="margin-left:auto;font-weight:700">${esc(c.result)}</span>` : ''}</div>
     <div class="cn">${esc(c.name)}</div><div class="cp">${g ? `<b class="cgame">${icon('spiele', 'mini')}${D.short(g.date)}</b> ` : ''}${esc(c.stadt || c.kreis || L?.l || '')}</div>
-    <div class="cflags"><button class="flagbtn ${c.requested ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="requested">angefragt</button><button class="flagbtn cb ${c.callback ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="callback">melden</button><button class="flagbtn ok ${c.done ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="done">fix</button></div></div>`;
+    <div class="cflags">${TSTATUS.map(S => `<button class="flagbtn st-${S.k} ${st === S.k ? 'on' : ''}" style="--sc:${S.c}" data-a="clubSt" data-id="${esc(c.id)}" data-v="${S.k}">${esc(S.s)}</button>`).join('')}</div></div>`;
 }
+// Vollständigkeit eines Vereins
+function clubMissing(c) {
+  const m = [], cs = contactsFor(c.name);
+  if (!c.level) m.push('Niveau'); if (!cs.some(x => x.phone)) m.push('Nummer'); if (!c.trainer && !cs.length) m.push('Trainer');
+  if (!c.bundesland) m.push('Bundesland'); if (!c.verband) m.push('Verband'); if (!c.kreis) m.push('Kreis'); if (!c.stadt) m.push('Stadt');
+  return m;
+}
+function viewVereine() {
+  const f = UI.vereine || (UI.vereine = { q: '', inc: false });
+  let cl = Store.all('club').sort(byName);
+  const incAll = cl.filter(c => clubMissing(c).length).length;
+  if (f.q) cl = cl.filter(c => (c.name + ' ' + c.stadt + ' ' + c.kreis).toLowerCase().includes(f.q));
+  if (f.inc) cl = cl.filter(c => clubMissing(c).length);
+  let h = `<input class="search" type="search" placeholder="Verein suchen…" value="${esc(f.q)}" data-a="vQ"><div id="results">
+    <div class="chips"><button class="chip ${f.inc ? '' : 'on'}" data-a="vInc" data-v="0">Alle (${Store.all('club').length})</button><button class="chip ${f.inc ? 'on' : ''}" data-a="vInc" data-v="1">Unvollständig (${incAll})</button></div>`;
+  let letter = null, open = false;
+  for (const c of cl) {
+    let nm = c.name || '?'; for (let k = 0; k < 3; k++) nm = nm.replace(/^(1\.|FC|SC|SV|TuS|VfL|VfB|SG|TSV|JSG|JFS|SSV|SpVgg\.?|Spfr|CfB|SuS|DSC|FV|JFV|TSC|SpVg)\s+/i, '');
+    const L = nm[0].toUpperCase();
+    if (L !== letter) { if (open) h += '</div>'; h += sec(L) + '<div class="card list">'; letter = L; open = true; }
+    const miss = clubMissing(c);
+    h += `<div class="li" data-a="openClub" data-id="${esc(c.id)}"><span class="lvb" style="--lc:${LVC[c.level || '']};background:${LVC[c.level || '']}">${esc(c.level || '–')}</span>
+      <div class="grow"><div class="t ell">${esc(c.name)}</div><div class="s ell">${esc([c.stadt, c.kreis, c.verband].filter(Boolean).join(' · ') || '–')}</div>
+      ${miss.length ? `<div class="missing">fehlt: ${esc(miss.join(', '))}</div>` : ''}</div>${miss.length ? `<span class="nbadge static" title="${miss.length} Angaben fehlen">${miss.length}</span>` : `<span class="okmark">✓</span>`}</div>`;
+  }
+  if (open) h += '</div>';
+  if (!cl.length) h += '<div class="empty">Keine Vereine gefunden.</div>';
+  return { title: 'Vereine', back: true, html: h + '</div>', fab: 'newClub' };
+}
+// Rückgängig: merkt sich die letzten Änderungen gruppiert pro Aktion
+const Undo = {
+  stack: [], cur: null, off: 0,
+  record(id, prev) {
+    if (this.off) return;
+    if (!this.cur) { this.cur = new Map(); this.stack.push(this.cur); if (this.stack.length > 40) this.stack.shift(); setTimeout(() => { this.cur = null; this.btn(); }, 0); }
+    if (!this.cur.has(id)) this.cur.set(id, prev ? JSON.parse(JSON.stringify(prev)) : null);
+  },
+  async undo() {
+    const g = this.stack.pop(); this.btn();
+    if (!g) return toast('Nichts zum Rückgängigmachen');
+    this.off++;
+    for (const [id, prev] of g) { if (prev) Store.put(id, prev.kind, prev.data); else Store.remove(id); }
+    this.off--;
+    if (!$('#sheet').hidden) await Sheet.close();
+    toast(g.size > 1 ? `Rückgängig: ${g.size} Änderungen` : 'Rückgängig gemacht'); render(); this.btn();
+  },
+  btn() { const b = $('#undo'); if (b) b.disabled = !this.stack.length; },
+};
 function clubDetail(id) {
   const c = Store.get(id); if (!c) return;
   const contacts = contactsFor(c.name), games = Store.all('game').filter(g => sameClub(g.opponent, c.name) || normC(g.opponent) === normC(c.name)).sort(byDate);
-  const rows = [['Niveau', LEVELS.find(l => l.k === c.level)?.l], ['Jahrgang', c.jahrgang], ['Stadt', c.stadt], ['Kreis', c.kreis], ['Verband', c.verband], ['Bundesland', c.bundesland], ['Trainer', c.trainer], ['Ergebnis / Termin', c.result], ['Notiz', c.note]].filter(x => x[1]);
+  const miss = clubMissing(c);
+  const rows = [['Status', TSTATUS.find(x => x.k === clubStatus(c))?.l], ['Fehlt noch', miss.join(', ')], ['Niveau', LEVELS.find(l => l.k === c.level)?.l], ['Jahrgang', c.jahrgang], ['Stadt', c.stadt], ['Kreis', c.kreis], ['Verband', c.verband], ['Bundesland', c.bundesland], ['Trainer', c.trainer], ['Ergebnis / Termin', c.result], ['Notiz', c.note]].filter(x => x[1]);
   Sheet.open(c.name, `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
     <div class="sub" style="margin-top:14px">Kontakte</div>${contacts.length ? `<div class="card list" style="margin:0">${contacts.map(contactRow).join('')}</div>` : '<div class="tiny mute">Kein Kontakt zu diesem Verein gespeichert.</div>'}
     <div class="sub" style="margin-top:14px">Spiele gegen diesen Verein</div>${games.length ? `<div class="card list" style="margin:0">${games.map(gameLine).join('')}</div>` : '<div class="tiny mute">Noch keins eingetragen.</div>'}`,
@@ -1228,13 +1527,13 @@ function clubDetail(id) {
 }
 function clubForm(c = {}, isNew) {
   openForm({
-    title: isNew ? 'Neuer Verein' : 'Verein bearbeiten', value: { jahrgang: '2013', ...c },
+    title: isNew ? 'Neuer Verein' : 'Verein bearbeiten', value: { jahrgang: '2013', ...c, status: clubStatus(c) },
     fields: [{ k: 'name', l: 'Verein', auto: isNew }, { k: 'level', l: 'Niveau', t: 'seg', opts: LEVELS.map(l => [l.k, l.l]) },
       [{ k: 'stadt', l: 'Stadt' }, { k: 'kreis', l: 'Kreis' }], [{ k: 'verband', l: 'Verband' }, { k: 'bundesland', l: 'Bundesland' }],
       [{ k: 'jahrgang', l: 'Jahrgang (Team)' }, { k: 'result', l: 'Ergebnis / Termin' }], { k: 'trainer', l: 'Trainer' },
-      { k: 'requested', l: 'Angefragt', t: 'toggle' }, { k: 'callback', l: 'Muss sich zurückmelden', t: 'toggle' }, { k: 'done', l: 'Vereinbart / abgeschlossen', t: 'toggle' },
+      { k: 'status', l: 'Status', t: 'seg', opts: TSTATUS.map(x => [x.k, x.l]) },
       { k: 'note', l: 'Notiz', t: 'textarea' }],
-    onSave: async v => { if (!v.name) return toast('Bitte einen Namen eingeben'); Store.put(c.id || uid('club'), 'club', { ...(c.id ? Store.data(c.id) : {}), ...v }); await Sheet.close(); render(); },
+    onSave: async v => { if (!v.name) return toast('Bitte einen Namen eingeben'); Object.assign(v, { done: v.status === 'fix', requested: v.status !== 'none', callback: false }); Store.put(c.id || uid('club'), 'club', { ...(c.id ? Store.data(c.id) : {}), ...v }); await Sheet.close(); render(); },
     onDelete: isNew ? null : async () => { if (!confirmDel(c.name)) return; Store.remove(c.id); await Sheet.close(); render(); },
   });
 }
@@ -1276,6 +1575,7 @@ function contactForm(c = {}, isNew) {
 function viewMehr(parts) {
   const sub = parts[0];
   if (sub === 'kontakte') return viewKontakte();
+  if (sub === 'vereine') return viewVereine();
   if (sub === 'material') return viewMaterial();
   if (sub === 'scouting') return viewScouting();
   if (sub === 'einstellungen') return viewSettings();
@@ -1284,6 +1584,7 @@ function viewMehr(parts) {
   const item = (h, ic, t, s) => `<div class="li" data-a="open" data-h="${h}"><span class="actions"><a>${icon(ic)}</a></span><div class="grow"><div class="t">${t}</div><div class="s">${s}</div></div>${icon('chev', 'chev')}</div>`;
   const html = `<div class="card list">
     ${item('#/mehr/kontakte', 'phone', 'Kontakte', cap(n('contact'), 'Kontakt', 'Kontakte'))}
+    ${item('#/mehr/vereine', 'tests', 'Vereine', `${cap(n('club'), 'Verein', 'Vereine')} · ${Store.all('club').filter(c => clubMissing(c).length).length} unvollständig`)}
     ${item('#/mehr/material', 'box', 'Material', need ? `${need} Dinge zu besorgen` : 'Bestand & Einkaufsliste')}
     ${item('#/mehr/scouting', 'eye', 'Scouting', cap(n('scout'), 'Spieler', 'Spieler') + ' auf der Liste')}
     ${item('#/mehr/einstellungen', 'gear', 'Einstellungen', 'Saisonphasen, Trainingstage, Checkliste, Import/Export')}</div>
@@ -1437,18 +1738,26 @@ const A = {
     const g = Store.get(el.dataset.id), max = setting().squadMax || 17;
     openForm({
       title: 'Spieltagskader', value: { sq: g.squad || [] }, saveLabel: 'Übernehmen',
-      fields: [{ k: 'sq', t: 'multi', max, opts: players().sort((a, b) => tierIdx(a) - tierIdx(b) || byName(a, b)).map(p => ({ v: p.id, l: p.name, s: posText(p), g: tierOf(p.tier).l })) }],
+      fields: [{ k: 'sq', t: 'multi', max, opts: players().sort((a, b) => tierIdx(a) - tierIdx(b) || byName(a, b)).map(p => ({ v: p.id, l: p.name, s: posChips(p, 5), inline: true, dot: tierOf(p.tier).c, g: tierOf(p.tier).l, r: p.number ? `<span class="tiny mute">#${esc(p.number)}</span>` : '' })) }],
       onSave: async v => { Store.patch(g.id, 'game', { squad: v.sq, start11: (g.start11 || []).filter(x => v.sq.includes(x)) }); await Sheet.close(); render(); },
     });
   },
-  pickStart: el => {
-    const g = Store.get(el.dataset.id), pool = (g.squad || []).length ? g.squad.map(id => Store.get(id)).filter(Boolean) : players();
-    openForm({
-      title: 'Startelf', value: { st: g.start11 || [] }, saveLabel: 'Übernehmen',
-      fields: [{ k: 'st', t: 'multi', max: 11, opts: pool.sort(byName).map(p => ({ v: p.id, l: p.name, s: posText(p) })) }],
-      onSave: async v => { Store.patch(g.id, 'game', { start11: v.st }); await Sheet.close(); render(); },
-    });
+  pickStart: el => lineupSheet(el.dataset.id),
+  luClear: el => saveLineup(el.dataset.id, {}),
+  setKit: el => { const g = Store.data(el.dataset.id); Store.patch(el.dataset.id, 'game', { kit: g.kit === el.dataset.v ? '' : el.dataset.v }); render(); },
+  placeSave: async el => {
+    const w = $('#wheel'), place = Math.round(w.scrollTop / 40) + 1, cx = $('#pcx').checked;
+    Store.patch(el.dataset.id, 'game', cx ? { cancelled: true } : { place, cancelled: false }); await Sheet.close(); toast(cx ? 'Als abgesagt markiert' : `Platz ${place} gespeichert`); render();
   },
+  resultScore: el => resultForm(Store.get(el.dataset.id), true),
+  undo: () => Undo.undo(),
+  clubSt: (el, ev) => { ev.stopPropagation(); const v = el.dataset.v; Store.patch(el.dataset.id, 'club', { status: v, done: v === 'fix', requested: v !== 'none', callback: false }); render(); },
+  vInc: el => { UI.vereine.inc = el.dataset.v === '1'; render(); },
+  blkMove: el => { const { week: k, day: d } = el.dataset, i = +el.dataset.b, j = i + +el.dataset.d, bl = blocksCopy(k, d); if (j < 0 || j >= bl.length) return; [bl[i], bl[j]] = [bl[j], bl[i]]; saveBlocks(k, d, bl); render(); },
+  blkDel: el => { const { week: k, day: d } = el.dataset, bl = blocksCopy(k, d); bl.splice(+el.dataset.b, 1); saveBlocks(k, d, bl); render(); },
+  blkAdd: el => { const { week: k, day: d, k: bk } = el.dataset, bl = blocksCopy(k, d), nb = { k: bk, items: [] }; if (bk === 'video') bl.unshift(nb); else bl.push(nb); saveBlocks(k, d, bl); render(); },
+  blkPick: el => blockPick(el.dataset.week, el.dataset.day, +el.dataset.b),
+  itemDel: el => { const { week: k, day: d } = el.dataset, bl = blocksCopy(k, d), b = bl[+el.dataset.b]; b.items = b.items.filter((_, j) => j !== +el.dataset.i); saveBlocks(k, d, bl); render(); },
   gcheck: el => { const g = Store.data(el.dataset.id), c = { ...(g.checks || {}) }; c[el.dataset.item] = !c[el.dataset.item]; Store.patch(el.dataset.id, 'game', { checks: c }); render(); },
   // Kader
   kGrp: el => { UI.kader.grp = el.dataset.v; render(); },
@@ -1558,7 +1867,7 @@ function checkForm(c, isNew) {
 
 // Eingaben (Suche, Notizen, Einstellungen)
 let qTimer;
-const Q = { kQ: 'kader', exQ: 'ex', athQ: 'ath', tQ: 'tests', cQ: 'contacts', sQ: 'scout' };
+const Q = { kQ: 'kader', exQ: 'ex', athQ: 'ath', tQ: 'tests', cQ: 'contacts', sQ: 'scout', vQ: 'vereine' };
 document.addEventListener('input', e => {
   const el = e.target, a = el.dataset.a;
   if (el.dataset.filter) {
@@ -1584,6 +1893,12 @@ document.addEventListener('change', e => {
   if (a === 'tDay') { const days = $$('[data-a="tDay"]:checked').map(i => +i.value); Store.patch('setting:main', 'setting', { trainingDays: days }); return toast('Gespeichert'); }
   if (a === 'setNum') { Store.patch('setting:main', 'setting', { [el.dataset.f]: +el.value || '' }); if (el.dataset.f === 'exPlayers') UI.ex.n = null; return toast('Gespeichert'); }
   if (a === 'importFile') return importFile(el.files[0]);
+  if (a === 'itemMin' || a === 'blkMin' || a === 'blkText') {
+    const k = el.dataset.week, d = el.dataset.day, bl = blocksCopy(k, d), b = bl[+el.dataset.b], num = el.value === '' ? '' : Math.max(0, +el.value);
+    if (a === 'itemMin') b.items[+el.dataset.i].min = num; else if (a === 'blkMin') b.min = num; else b.text = el.value;
+    saveBlocks(k, d, bl); return render();
+  }
+  if (a === 'dayDur') { setDay(el.dataset.week, el.dataset.day, { duration: +el.value || '' }); return render(); }
 });
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]'); if (!el) return;
@@ -1602,7 +1917,7 @@ async function importFile(file) {
     const existing = data.items.filter(it => Store.items.has(it.id)).length;
     if (existing && !confirm(`${existing} von ${data.items.length} Einträgen gibt es schon. Mit den Werten aus der Datei überschreiben?`)) return;
     for (const it of data.items) Store.put(it.id, it.kind, it.data, true);
-    migratePositions(); toast(`${data.items.length} Einträge importiert`);
+    Undo.off++; migratePositions(); Undo.off--; migrate13(); toast(`${data.items.length} Einträge importiert`);
     await Store.flush(); render();
   } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
 }
@@ -1623,11 +1938,27 @@ function showLogin(msg = '') {
     startApp(data.user);
   });
 }
+// Einmalige Umstellung auf Version 1.3
+const ABSCHLUSS = [11, 10, 9, 8, 7];
+function migrate13() {
+  Undo.off++;
+  for (const g of Store.all('game')) { const t = g.type === 'Leistungsvergleich' ? 'LV' : g.type === 'Sonstiges' ? '' : g.type; if (t !== g.type) Store.put(g.id, 'game', { ...Store.data(g.id), type: t }, true); }
+  for (const c of Store.all('club')) if (!c.status) Store.put(c.id, 'club', { ...Store.data(c.id), status: clubStatus(c) }, true);
+  if (!Store.data('setting:migr13')) {
+    for (const N of ABSCHLUSS) {
+      const id = `ex:abschluss-${N}v${N}`, fp = 2 * (N - 1); if (Store.items.has(id)) continue;
+      const fit = { [fp]: 3 }; if (fp - 1 >= 1) fit[fp - 1] = 2; if (fp + 1 <= 21) fit[fp + 1] = 2; if (fp - 2 >= 1) fit[fp - 2] = 1;
+      Store.put(id, 'exercise', { name: `${N} gegen ${N}`, variant: '', expl: `Abschlussspiel ${N} gegen ${N} mit Torhütern.`, fit, tphases: ['abschluss'], phases: [], diff: '', intensity: 'hoch', rating: 0 }, true);
+    }
+    Store.put('setting:migr13', 'setting', { done: D.today() }, true);
+  }
+  Undo.off--; if (Object.keys(Store.pending).length) Store.flushSoon();
+}
 async function startApp(user) {
   Store.user = user || null; $('#top').style.display = '';
-  Store.restore(); migratePositions(); render();
+  Store.restore(); Undo.off++; migratePositions(); Undo.off--; migrate13(); render();
   if (REMOTE) {
-    try { await Store.fetchAll(); Store.error = ''; migratePositions(); } catch (e) { Store.error = e.message; }
+    try { await Store.fetchAll(); Store.error = ''; Undo.off++; migratePositions(); Undo.off--; migrate13(); } catch (e) { Store.error = e.message; }
     render(); Store.flush();
   }
 }
