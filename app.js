@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.0';
+const VERSION = '1.1';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -53,32 +53,62 @@ const GP = {
 };
 const GP5 = ['EBB', 'GBB', 'UBV', 'UBG', 'STD'];
 const TIERS = [
-  { k: 'top', l: 'Top Tier', c: '#15803d' }, { k: 'good', l: 'Gut', c: '#65a30d' }, { k: 'okay', l: 'Okay', c: '#ca8a04' },
-  { k: 'q', l: '?', c: '#64748b' }, { k: 'warn', l: '!', c: '#dc2626' }, { k: 'fix', l: 'Fix', c: '#2563eb' }, { k: '', l: 'Ohne Einstufung', c: '#a3b1aa' }];
+  { k: 'top', l: 'Top Tier', s: 'Top', c: '#1e40af', bg: '#dbe4ff' }, { k: 'good', l: 'Gut', s: 'Gut', c: '#15803d', bg: '#dcf3e3' },
+  { k: 'okay', l: 'Okay', s: 'Okay', c: '#ca8a04', bg: '#fdf1cf' }, { k: 'q', l: '?', s: '?', c: '#d2544a', bg: '#fbe1de' },
+  { k: '', l: 'Ohne Einstufung', s: 'Ohne', c: '#a3a1b1', bg: '#eceaf2' }];
+const TIER_RANK = ['top', 'good', 'okay', 'q'];
 const tierOf = k => TIERS.find(t => t.k === (k || '')) || TIERS[TIERS.length - 1];
-const POS = [
-  { k: 'TW', s: 'TW', l: 'TW', f: 'Torwart' }, { k: 'VZ', l: 'V(Z)', f: 'Verteidiger zentral' }, { k: 'VA', l: 'V(A)', f: 'Verteidiger außen' },
-  { k: 'MZ', l: 'M(Z)', f: 'Mittelfeld zentral' }, { k: 'MA', l: 'M(A)', f: 'Mittelfeld außen' },
-  { k: 'AZ', l: 'A(Z)', f: 'Angriff zentral' }, { k: 'AA', l: 'A(A)', f: 'Angriff außen' }];
-const POSLV = { 1: 'Haupt', 2: 'Gut', 3: 'Möglich' };
+// Stärke auf einer Position: Stammposition = eigene Einstufung, „kommt in Frage“ = eine Stufe tiefer
+function effTier(p, posKey) {
+  const lv = (p.posv || {})[posKey]; const r = TIER_RANK.indexOf(p.tier || '');
+  if (!lv || r < 0) return null;
+  const e = r + (lv === 2 ? 1 : 0);
+  return e < TIER_RANK.length ? { rank: e, tier: TIER_RANK[e], lv } : { rank: 9, tier: null, lv };
+}
+const POSV = [
+  { k: 'TW', l: 'TW', f: 'Torwart', g: 'Tor' },
+  { k: 'LIV', l: 'LIV', f: 'Linker Innenverteidiger', g: 'Abwehr' }, { k: 'ZIV', l: 'ZIV', f: 'Zentraler Innenverteidiger', g: 'Abwehr' },
+  { k: 'RIV', l: 'RIV', f: 'Rechter Innenverteidiger', g: 'Abwehr' },
+  { k: 'LV', l: 'LV', f: 'Linksverteidiger (Viererkette)', g: 'Abwehr' }, { k: 'RV', l: 'RV', f: 'Rechtsverteidiger (Viererkette)', g: 'Abwehr' },
+  { k: 'LS', l: 'LS', f: 'Linke Schiene (Dreierkette)', g: 'Abwehr' }, { k: 'RS', l: 'RS', f: 'Rechte Schiene (Dreierkette)', g: 'Abwehr' },
+  { k: 'SECHS', l: '6', f: 'Defensives Mittelfeld (6)', g: 'Mittelfeld' }, { k: 'ACHT', l: '8', f: 'Zentrales Mittelfeld (8)', g: 'Mittelfeld' },
+  { k: 'ZEHN', l: '10', f: 'Offensives Mittelfeld (10)', g: 'Mittelfeld' },
+  { k: 'LF', l: 'LF', f: 'Linker Flügel', g: 'Angriff' }, { k: 'RF', l: 'RF', f: 'Rechter Flügel', g: 'Angriff' },
+  { k: 'ACHTFUENF', l: '8,5', f: 'Hängende Spitze (8,5)', g: 'Angriff' }, { k: 'NEUN', l: '9', f: 'Spitze (9)', g: 'Angriff' }];
+const posvOf = k => POSV.find(p => p.k === k);
+const POSVLV = { 1: 'Stamm', 2: 'in Frage' };
 const GROUPS = ['TW', 'Abwehr', 'Mittelfeld', 'Sturm'];
 const GROUPL = { TW: 'Torwart', Abwehr: 'Abwehr', Mittelfeld: 'Mittelfeld', Sturm: 'Sturm' };
-const SLOTS = [
-  { k: 'MS', s: 'Sturm', l: 'Mittelstürmer', x: 50, y: 9, pos: ['AZ'] },
-  { k: 'LF', s: 'Li. Flügel', l: 'Linker Flügel', x: 13, y: 18, pos: ['AA', 'MA'] },
-  { k: 'RF', s: 'Re. Flügel', l: 'Rechter Flügel', x: 87, y: 18, pos: ['AA', 'MA'] },
-  { k: 'ZEHN', s: '10er', l: '10er', x: 50, y: 31, pos: ['MZ', 'AZ'] },
-  { k: 'ZM', s: 'ZM', l: 'Zentr. MF', x: 30, y: 44, pos: ['MZ'] },
-  { k: 'ACHT', s: '8,5er', l: '8,5er', x: 70, y: 44, pos: ['MZ'] },
-  { k: 'LFV', s: 'LFV', l: 'Li. Flügelvert.', x: 11, y: 56, pos: ['VA', 'MA'] },
-  { k: 'DM', s: 'DM', l: 'Defensives MF', x: 50, y: 58, pos: ['MZ', 'VZ'] },
-  { k: 'RFV', s: 'RFV', l: 'Re. Flügelvert.', x: 89, y: 56, pos: ['VA', 'MA'] },
-  { k: 'LAV', s: 'LAV', l: 'Linker AV', x: 11, y: 69, pos: ['VA'] },
-  { k: 'RAV', s: 'RAV', l: 'Rechter AV', x: 89, y: 69, pos: ['VA'] },
-  { k: 'LIV', s: 'LIV', l: 'Linker IV', x: 30.5, y: 79, pos: ['VZ'] },
-  { k: 'ZIV', s: 'ZIV', l: 'Zentraler IV', x: 50, y: 79, pos: ['VZ'] },
-  { k: 'RIV', s: 'RIV', l: 'Rechter IV', x: 69.5, y: 79, pos: ['VZ'] },
-  { k: 'TW', l: 'Torwart', x: 50, y: 92, pos: ['TW'] }];
+// Feld-Anordnung (6er-Raster): [Position, Spalte von, Spalte bis]
+const PITCH = [
+  [['LF', 1, 3], ['NEUN', 3, 5], ['RF', 5, 7]],
+  [['ACHTFUENF', 2, 4], ['ZEHN', 4, 6]],
+  [['LS', 1, 3], ['ACHT', 3, 5], ['RS', 5, 7]],
+  [['LV', 1, 3], ['SECHS', 3, 5], ['RV', 5, 7]],
+  [['LIV', 1, 3], ['ZIV', 3, 5], ['RIV', 5, 7]],
+  [['TW', 3, 5]]];
+// Einmalige Umstellung: alte grobe Positionen (TW, VZ, VA, MZ, MA, AZ, AA) + alter Positionsplan → 15 Positionen
+function migratePositions() {
+  const lu = (Store.data('lineup:main') || {}).slots || {};
+  const SLOTMAP = { TW: 'TW', RAV: 'RV', LAV: 'LV', RIV: 'RIV', ZIV: 'ZIV', LIV: 'LIV', RFV: 'RS', LFV: 'LS', DM: 'SECHS', ZM: 'ACHT', ZEHN: 'ZEHN', ACHT: 'ACHTFUENF', MS: 'NEUN', RF: 'RF', LF: 'LF' };
+  const FAM = {
+    TW: { 1: { TW: 1 }, x: { TW: 2 } },
+    VZ: { 1: { LIV: 1, ZIV: 1, RIV: 1 }, x: { LIV: 2, ZIV: 2, RIV: 2 } },
+    VA: { 1: { LV: 1, RV: 1, LS: 2, RS: 2 }, x: { LV: 2, RV: 2 } },
+    MZ: { 1: { SECHS: 1, ACHT: 1, ZEHN: 2 }, x: { SECHS: 2, ACHT: 2 } },
+    MA: { 1: { LS: 2, RS: 2, LF: 2, RF: 2 }, x: { LF: 2, RF: 2 } },
+    AZ: { 1: { NEUN: 1, ZEHN: 2 }, x: { NEUN: 2 } },
+    AA: { 1: { LF: 1, RF: 1 }, x: { LF: 2, RF: 2 } } };
+  let n = 0;
+  for (const p of Store.all('player')) {
+    if (p.posv) continue;
+    const pv = {}, set = (k, l) => { if (!pv[k] || l < pv[k]) pv[k] = l; };
+    for (const [fam, lvl] of Object.entries(p.pos || {})) { const m = FAM[fam]; if (m) for (const [k, l] of Object.entries(lvl === 1 ? m[1] : m.x)) set(k, l); }
+    for (const [slot, ids] of Object.entries(lu)) { const i = (ids || []).indexOf(p.id); if (i >= 0 && SLOTMAP[slot]) set(SLOTMAP[slot], i < 2 ? 1 : 2); }
+    Store.put(p.id, 'player', { ...Store.data(p.id), posv: pv }, true); n++;
+  }
+  if (n) Store.flushSoon();
+}
 const MAKRO = { HR: 'Hinrunde', RR: 'Rückrunde' };
 const PHC = { vorb: '#0284c7', wettk: '#15803d', nachb: '#9333ea' };
 const LEVELS = [
@@ -113,6 +143,7 @@ const IC = {
   down: '<path d="m6 9 6 6 6-6"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
 };
+const crestBtn = () => `<button class="crest" data-a="open" data-h="#/mehr/einstellungen" aria-label="Einstellungen"><img src="icons/wappen.png" alt="FC Hennef 05"></button>`;
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}">${IC[n] || ''}</svg>`;
 
 // ───────────────────────── Datenspeicher ─────────────────────────
@@ -195,7 +226,7 @@ const setting = () => Store.data('setting:main') || { trainingDays: [2, 4, 5], s
 
 // ───────────────────────── UI-Grundgerüst ─────────────────────────
 const UI = { ex: { n: null, diff: '', int: '', ph: '', q: '', sort: 'fit' }, ath: { cat: '', q: '' }, kader: { grp: '', q: '' },
-  games: { when: 'next', type: '' }, tests: { lvl: '', st: '', q: '' }, contacts: { q: '' }, scout: { prio: '', q: '' }, topics: { ph: '' }, mat: 'need' };
+  games: { when: 'next', type: '' }, tests: { lvls: new Set(), st: '', q: '' }, contacts: { q: '' }, scout: { prio: '', q: '' }, topics: { ph: '' }, mat: 'need' };
 
 const TABS = [
   { k: 'saison', l: 'Saison' }, { k: 'spiele', l: 'Spiele' }, { k: 'kader', l: 'Kader' },
@@ -287,9 +318,10 @@ function field(f, v) {
       for (let n = 1; n <= 21; n++) { const s = fit[n] || 0; b += `<button type="button" class="fit${s}" data-a="fitCycle" data-n="${n}">${n}</button>`; }
       return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="fitgrid" data-fit="${f.k}" data-val='${esc(JSON.stringify(fit))}'>${b}</div>
         <div class="hint">Antippen wechselt: – → Möglich → Gut → Ideal</div></div>`; }
-    case 'pos': { const pos = val || {};
-      return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="posgrid" data-pos="${f.k}" data-val='${esc(JSON.stringify(pos))}'>${POS.map(p => `<button type="button" class="${pos[p.k] ? 'l' + pos[p.k] : ''}" data-a="posCycle" data-p="${p.k}"><b>${p.l}</b><span>${pos[p.k] ? POSLV[pos[p.k]] : '–'}</span></button>`).join('')}</div>
-        <div class="hint">Antippen wechselt: – → Hauptposition → Gut → Möglich</div></div>`; }
+    case 'posv': { const pv = val || {}; let grp = null, b = '';
+      for (const P of POSV) { if (P.g !== grp) { b += `<div class="pvg">${P.g}</div>`; grp = P.g; } const l = pv[P.k] || 0; b += `<button type="button" class="${l ? 'l' + l : ''}" data-a="posvCycle" data-p="${P.k}" title="${esc(P.f)}"><b>${P.l}</b><span>${l ? POSVLV[l] : '–'}</span></button>`; }
+      return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="posgrid pv" data-posv="${f.k}" data-val='${esc(JSON.stringify(pv))}'>${b}</div>
+        <div class="hint">Antippen wechselt: – → Stamm → in Frage → –. „In Frage“ zählt eine Stufe tiefer.</div></div>`; }
     case 'html': return f.html;
     default: return `<div class="f">${lab}<input id="${id}" type="text" name="${f.k}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.auto ? 'autofocus' : ''}>${hint}</div>`;
   }
@@ -315,7 +347,7 @@ function readForm() {
     else if (f.t === 'chips' || f.t === 'multi') out[f.k] = $$(`[name="${f.k}"]:checked`, el).map(i => i.value);
     else if (f.t === 'seg') out[f.k] = $(`[name="${f.k}"]:checked`, el)?.value ?? '';
     else if (f.t === 'fit') out[f.k] = JSON.parse($(`[data-fit="${f.k}"]`, el).dataset.val);
-    else if (f.t === 'pos') out[f.k] = JSON.parse($(`[data-pos="${f.k}"]`, el).dataset.val);
+    else if (f.t === 'posv') out[f.k] = JSON.parse($(`[data-posv="${f.k}"]`, el).dataset.val);
     else if (f.t === 'html') continue;
     else { const i = $(`[name="${f.k}"]`, el); if (i) out[f.k] = f.t === 'number' ? (i.value === '' ? '' : +i.value) : i.value.trim(); }
   }
@@ -343,7 +375,7 @@ function weekTaskRows(p, key) {
   return `<div class="list checks">${tasks.map(t => check(!!done[t.id], t.title, `data-a="wtask" data-id="${esc(t.id)}" data-week="${key}"`)).join('')}</div>`;
 }
 function gameLine(g) {
-  const res = g.result ? ` · <b>${esc(g.result)}</b>` : '';
+  const o = outcome(g), res = g.cancelled ? ' · abgesagt' : o ? ` · <b style="color:${OUT[o].c}">${esc(g.result)}</b>` : needsResult(g) ? ' · <b style="color:#7c3aed">Ergebnis fehlt</b>' : '';
   return `<div class="li" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent || 'Spiel')}</div>
     <div class="s">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag offen' : D.long(g.date)}${g.kickoff ? ' · ' + esc(g.kickoff) : ''}${g.type ? ' · ' + esc(g.type) : ''}${res}</div></div>
     ${g.ha ? `<span class="ha ${g.ha}">${g.ha}</span>` : ''}${icon('chev', 'chev')}</div>`;
@@ -381,6 +413,8 @@ function viewSaison(parts) {
   }
   if (nxt && D.diff(t, nxt.start) <= 14) h += phaseAlert(nxt, `Bald: ${phaseName(nxt)}`, `Startet ${D.long(nxt.start)} – schon vorbereiten:`);
 
+  const resTodo = Store.all('game').filter(needsResult).sort(byDate);
+  if (resTodo.length) h += `<div class="card alert"><h3><span class="grow">Ergebnis eintragen</span><span class="nbadge static">${resTodo.length}</span></h3><div class="list">${resTodo.slice(0, 5).map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
   if (cur) {
     const games = weekGames(wk.key);
     h += sec(`Diese Woche · KW ${wk.week}`, `<button class="link" data-a="open" data-h="#/saison/woche/${wk.key}">Woche öffnen</button>`);
@@ -399,7 +433,7 @@ function viewSaison(parts) {
     h += sec(`Makrozyklus · ${MAKRO[mk]}`, `<span class="tiny">${D.full(ps[0].start)} – ${D.full(ps[ps.length - 1].end)}</span>`);
     h += ps.map(p => mesoCard(p, cur && cur.id === p.id)).join('');
   }
-  return { title: 'Saison', html: h, actions: `<button class="iconbtn" data-a="open" data-h="#/mehr/einstellungen" aria-label="Einstellungen">${icon('gear')}</button>` };
+  return { title: 'Saison', html: h, actions: crestBtn() };
 }
 function phaseAlert(p, title, intro) {
   const open = tasksOf(p.id, 'meso').filter(x => !x.done);
@@ -459,29 +493,70 @@ function viewWeek(key) {
 }
 
 // ───────────────────────── Spiele & Spieltag ─────────────────────────
+function parseResult(r) { const m = /^\s*(\d+)\s*[:\-]\s*(\d+)\s*$/.exec(r || ''); return m ? [+m[1], +m[2]] : null; }
+function outcome(g) { const r = parseResult(g.result); if (!r) return null; return r[0] > r[1] ? 'S' : r[0] < r[1] ? 'N' : 'U'; }
+const OUT = { S: { l: 'Sieg', c: '#16a34a' }, U: { l: 'Unentschieden', c: '#d4a106' }, N: { l: 'Niederlage', c: '#dc2626' } };
+// Offene Punkte eines Spiels: nach dem Spiel Ergebnis + nicht abgehakte Checkliste
+function openItems(g) {
+  if (g.cancelled || g.date >= D.today()) return 0;
+  const items = Store.all('checkitem');
+  return (parseResult(g.result) ? 0 : 1) + items.filter(i => !(g.checks || {})[i.id]).length;
+}
+const gameDone = g => g.cancelled || (g.date < D.today() && !!parseResult(g.result));
+const needsResult = g => !g.cancelled && g.date < D.today() && !parseResult(g.result);
+const shortOpp = s => (s || 'Spiel').replace(/\s*\((?:U\d+|F)\)/gi, '').replace(/\s+U1\d(\/\d)?(-\d)?\b/g, '').trim();
+function formCurve(games) {
+  const gs = games.filter(g => !g.cancelled && outcome(g)).sort(byDate);
+  if (gs.length < 2) return '';
+  const pts = { S: 3, U: 1, N: 0 }, W = 340, H = 112, pad = 12, n = gs.length;
+  const x = i => pad + (n === 1 ? 0 : i * (W - 2 * pad) / (n - 1));
+  const roll = gs.map((g, i) => { const w = gs.slice(Math.max(0, i - 4), i + 1); return w.reduce((s, x) => s + pts[outcome(x)], 0) / w.length; });
+  const y = v => 14 + (3 - v) / 3 * 62;
+  const line = roll.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(n - 1).toFixed(1)},76 L${x(0).toFixed(1)},76 Z`;
+  const tot = { S: 0, U: 0, N: 0 }; let gf = 0, ga = 0;
+  for (const g of gs) { tot[outcome(g)]++; const r = parseResult(g.result); gf += r[0]; ga += r[1]; }
+  const last5 = gs.slice(-5);
+  return `<div class="card form"><div class="row"><b class="grow">Formkurve</b><span class="small mute">${tot.S} S · ${tot.U} U · ${tot.N} N · Tore ${gf}:${ga}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" class="curve" role="img" aria-label="Formkurve">
+      <line x1="${pad}" x2="${W - pad}" y1="${y(1.5)}" y2="${y(1.5)}" class="mid"/>
+      <path d="${area}" class="area"/><path d="${line}" class="ln"/>
+      ${gs.map((g, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(roll[i]).toFixed(1)}" r="2.2" class="pt"/><rect x="${(x(i) - 3).toFixed(1)}" y="${106 - { S: 20, U: 11, N: 4 }[outcome(g)]}" width="6" height="${{ S: 20, U: 11, N: 4 }[outcome(g)]}" rx="2" fill="${OUT[outcome(g)].c}"/>`).join('')}
+    </svg>
+    <div class="row small"><span class="mute grow">Linie: Punkteschnitt der letzten 5 Spiele (0–3)</span><span>Letzte 5: ${last5.map(g => `<span class="fdot" style="background:${OUT[outcome(g)].c}">${outcome(g)}</span>`).join('')}</span></div></div>`;
+}
+function gameTile(g) {
+  const o = outcome(g), open = openItems(g), up = !g.cancelled && g.date >= D.today();
+  const days = up ? D.diff(D.today(), g.date) : null;
+  return `<div class="gtile ${o ? 'o' + o : ''} ${g.cancelled ? 'cx' : ''} ${up ? 'up' : ''}" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">
+    ${open ? `<span class="nbadge">${open}</span>` : ''}
+    <div class="gd">${D.wd(g.date)} ${D.parse(g.date).getDate()}.${g.ha ? ` <span class="ha ${g.ha}">${g.ha}</span>` : ''}</div>
+    <div class="go">${esc(shortOpp(g.opponent))}</div>
+    <div class="gr">${g.cancelled ? 'abgesagt' : o ? esc(g.result) : up ? (g.kickoff ? esc(g.kickoff) : days === 0 ? 'heute' : 'in ' + days + ' T.') : 'Ergebnis?'}</div>
+    <div class="gt">${esc(g.type || '')}${g.important ? ' ⭐' : ''}</div></div>`;
+}
 function viewSpiele(parts) {
   if (parts[0]) return viewGame(parts[0]);
   const t = D.today(), f = UI.games;
-  let games = Store.all('game').sort(byDate);
-  if (f.when === 'next') games = games.filter(g => g.date >= t);
-  if (f.when === 'past') games = games.filter(g => g.date < t).reverse();
-  if (f.type) games = games.filter(g => (g.type || '') === f.type);
-  let h = `<div class="seg">${[['next', 'Kommend'], ['all', 'Alle'], ['past', 'Vergangen']].map(([v, l]) => `<button class="${f.when === v ? 'on' : ''}" data-a="gWhen" data-v="${v}">${l}</button>`).join('')}</div>`;
+  let all = Store.all('game').sort(byDate);
+  if (f.type) all = all.filter(g => (g.type || '') === f.type);
+  const todo = all.filter(needsResult);
+  let games = f.when === 'next' ? all.filter(g => !gameDone(g) && g.date >= t) : f.when === 'past' ? all.filter(g => g.date < t).reverse() : all;
+  let h = `<div class="seg">${[['next', 'Kommend'], ['past', 'Gespielt'], ['all', 'Alle']].map(([v, l]) => `<button class="${f.when === v ? 'on' : ''}" data-a="gWhen" data-v="${v}">${l}</button>`).join('')}</div>`;
   h += chips([['', 'Alle Typen'], ...GTYPES.map(x => [x, x])], f.type, 'gType');
+  h += formCurve(all.filter(g => g.date < t));
+  if (todo.length) h += `<div class="card alert"><h3><span class="grow">Ergebnis eintragen</span><span class="nbadge static">${todo.length}</span></h3>
+    <div class="list">${todo.map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)} · ${esc(g.type || 'Spiel')}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
   if (!games.length) h += '<div class="empty">Keine Spiele für diese Auswahl.</div>';
-  let month = null, open = false;
+  let month = null;
   for (const g of games) {
     const m = D.month(g.date);
-    if (m !== month) { if (open) h += '</div>'; h += sec(m) + '<div class="card list">'; month = m; open = true; }
-    const st = prepStatus(g);
-    h += `<div class="li game" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">
-      <div class="date"><span>${D.wd(g.date)}</span><b>${D.parse(g.date).getDate()}.</b></div>
-      <div class="grow"><div class="t ell">${esc(g.opponent || 'Spiel')}</div>
-      <div class="s">${[g.tentative ? 'Tag offen' : g.kickoff && esc(g.kickoff) + ' Uhr', g.type && esc(g.type), g.result && '<b>' + esc(g.result) + '</b>', g.important && '⭐ wichtig'].filter(Boolean).join(' · ') || '&nbsp;'}</div>
-      <div class="tiny mute">${st}</div></div>${g.ha ? `<span class="ha ${g.ha}">${g.ha}</span>` : ''}</div>`;
+    if (m !== month) { if (month) h += '</div>'; h += sec(m) + '<div class="gtiles">'; month = m; }
+    h += gameTile(g);
   }
-  if (open) h += '</div>';
-  return { title: 'Spiele', html: h, fab: 'newGame' };
+  if (month) h += '</div>';
+  h += `<div class="legend" style="margin:12px 4px">${Object.values(OUT).map(o => `<span><span class="dot" style="background:${o.c};width:9px;height:9px"></span> ${o.l}</span>`).join('')}<span><span class="nbadge static">1</span> offen</span></div>`;
+  return { title: 'Spiele', html: h, fab: 'newGame', actions: crestBtn() };
 }
 function prepStatus(g) {
   const items = Store.all('checkitem'), done = items.filter(i => (g.checks || {})[i.id]).length;
@@ -498,13 +573,16 @@ function viewGame(id) {
   const g = Store.get(id); if (!g) return notFound();
   const club = findClub(g.opponent), contacts = contactsFor(club ? club.name : g.opponent);
   const items = Store.all('checkitem').sort(byOrder), checks = g.checks || {};
-  const prep = g.prep || {}, s = setting();
-  let h = `<div class="card"><div class="row"><div class="grow"><div style="font-size:21px;font-weight:800">${esc(g.opponent || 'Spiel')}</div>
+  const prep = g.prep || {}, s = setting(), o = outcome(g);
+  let h = `<div class="card ${o ? 'o' + o : ''}" style="${o ? `border-left:5px solid ${OUT[o].c}` : ''}"><div class="row"><div class="grow"><div style="font-size:21px;font-weight:800">${esc(g.opponent || 'Spiel')}</div>
     <div class="small mute">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag noch offen' : D.long(g.date) + ' ' + D.parse(g.date).getFullYear()}</div></div>
     ${g.ha ? `<span class="ha ${g.ha}" style="font-size:14px">${g.ha === 'H' ? 'Heim' : 'Auswärts'}</span>` : ''}</div>
-    <div class="badges">${g.type ? badge(g.type) : ''}${g.important ? badge('wichtiges Spiel', '#d97706') : ''}${g.result ? badge('Ergebnis ' + g.result, 'var(--accent)') : ''}${club && club.level ? badge(LEVELS.find(l => l.k === club.level)?.l || club.level) : ''}</div>
+    ${o ? `<div class="bigres" style="color:${OUT[o].c}">${esc(g.result)} <span>${OUT[o].l}</span></div>` : ''}
+    <div class="badges">${g.cancelled ? badge('abgesagt', '#64748b') : ''}${g.type ? badge(g.type) : ''}${g.important ? badge('wichtiges Spiel', '#d97706') : ''}${club && club.level ? badge(LEVELS.find(l => l.k === club.level)?.l || club.level) : ''}${g.source ? badge('fussball.de') : ''}</div>
     <dl class="kv" style="margin-top:12px">${g.meet ? `<dt>Treffen</dt><dd>${esc(g.meet)} Uhr</dd>` : ''}${g.kickoff ? `<dt>Anstoß</dt><dd>${esc(g.kickoff)} Uhr</dd>` : ''}${g.venue ? `<dt>Ort</dt><dd>${esc(g.venue)}</dd>` : ''}${g.note ? `<dt>Notiz</dt><dd>${esc(g.note)}</dd>` : ''}</dl>
-    <button class="btn sm" data-a="editGame" data-id="${esc(id)}" style="margin-top:10px">${icon('edit')} Spieldaten</button></div>`;
+    <div class="row" style="margin-top:10px;gap:6px"><button class="btn sm" data-a="editGame" data-id="${esc(id)}">${icon('edit')} Spieldaten</button>
+    ${!g.cancelled && g.date <= D.today() ? `<button class="btn sm primary" data-a="quickResult" data-id="${esc(id)}">${o ? 'Ergebnis ändern' : 'Ergebnis eintragen'}</button>` : ''}</div></div>`;
+  if (needsResult(g)) h += `<div class="warnbox">Das Spiel ist vorbei – bitte noch das Ergebnis eintragen.</div>`;
 
   const squad = g.squad || [], start = g.start11 || [], warn = startWarnings(g);
   h += sec('Kader & Startelf');
@@ -541,21 +619,37 @@ function viewGame(id) {
   h += `<div class="card"><div class="f" style="margin:0"><textarea data-a="gameField" data-id="${esc(id)}" data-f="review" placeholder="Was lief gut? Was nehmen wir mit ins Training?">${esc(g.review || '')}</textarea></div></div>`;
   return { title: g.opponent || 'Spiel', back: true, html: h };
 }
+function resultForm(g) {
+  const r = parseResult(g.result) || ['', ''];
+  openForm({
+    title: `Ergebnis · ${g.opponent}`, value: { us: r[0], them: r[1] },
+    top: `<div class="small mute" style="margin-bottom:12px">${D.long(g.date)} · ${g.ha === 'A' ? 'auswärts' : g.ha === 'H' ? 'zuhause' : ''} – aus unserer Sicht</div>`,
+    fields: [[{ k: 'us', l: 'FC Hennef', t: 'number' }, { k: 'them', l: shortOpp(g.opponent), t: 'number' }],
+      { k: 'cancelled', l: 'Spiel ist ausgefallen / abgesagt', t: 'toggle' }],
+    onSave: async v => {
+      if (v.cancelled) { Store.patch(g.id, 'game', { cancelled: true, result: '' }); }
+      else { if (v.us === '' || v.them === '') return toast('Bitte beide Tore eintragen'); Store.patch(g.id, 'game', { result: `${v.us}:${v.them}`, cancelled: false }); }
+      await Sheet.close(); toast('Gespeichert'); render();
+    },
+  });
+}
 function gameForm(g = {}, isNew) {
   openForm({
     title: isNew ? 'Neues Spiel' : 'Spieldaten', value: g,
     fields: [
       { k: 'opponent', l: 'Gegner', auto: isNew },
       [{ k: 'date', l: 'Datum', t: 'date' }, { k: 'kickoff', l: 'Anstoß', t: 'time' }],
-      [{ k: 'meet', l: 'Treffen', t: 'time' }, { k: 'result', l: 'Ergebnis', ph: 'z. B. 3:1' }],
+      [{ k: 'meet', l: 'Treffen', t: 'time' }, { k: 'result', l: 'Ergebnis (wir : Gegner)', ph: 'z. B. 3:1' }],
       { k: 'ha', l: 'Heim / Auswärts', t: 'seg', opts: [['H', 'Heim'], ['A', 'Auswärts'], ['', 'offen']] },
       { k: 'type', l: 'Art', t: 'seg', opts: GTYPES.map(x => [x, x]) },
       { k: 'venue', l: 'Ort / Platz' },
       { k: 'important', l: 'Wichtiges Spiel', t: 'toggle' },
+      { k: 'cancelled', l: 'Spiel abgesagt', t: 'toggle' },
       { k: 'tentative', l: 'Tag steht noch nicht fest', t: 'toggle' },
       { k: 'note', l: 'Notiz', t: 'textarea' }],
     onSave: async v => {
       if (!v.date) return toast('Bitte ein Datum wählen');
+      if (v.result && !parseResult(v.result)) return toast('Ergebnis bitte als „3:1“ eintragen');
       const id = g.id || uid('game');
       Store.put(id, 'game', { ...(Store.data(id) || {}), ...v });
       await Sheet.close();
@@ -564,111 +658,183 @@ function gameForm(g = {}, isNew) {
     onDelete: isNew ? null : async () => { if (!confirmDel('Spiel')) return; Store.remove(g.id); await Sheet.close(); go('#/spiele'); },
   });
 }
-
 // ───────────────────────── Kader ─────────────────────────
 const players = () => Store.all('player').sort(byName);
-function posChips(p) {
-  return Object.entries(p.pos || {}).sort((a, b) => a[1] - b[1]).map(([k, l]) => `<span class="pos l${l}">${POS.find(x => x.k === k)?.l || k}</span>`).join(' ');
+const tierIdx = p => { const i = TIER_RANK.indexOf(p.tier || ''); return i < 0 ? 9 : i; };
+function posChips(p, max = 6) {
+  const e = Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1] || POSV.findIndex(x => x.k === a[0]) - POSV.findIndex(x => x.k === b[0]));
+  return e.slice(0, max).map(([k, l]) => `<span class="pos l${l}">${posvOf(k)?.l || k}</span>`).join(' ') + (e.length > max ? ` <span class="tiny mute">+${e.length - max}</span>` : '');
 }
+const posText = p => Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1]).map(([k, l]) => (posvOf(k)?.l || k) + (l === 2 ? '?' : '')).join(' ');
 function viewKader(parts) {
-  const sub = parts[0] || 'liste';
-  let h = `<div class="seg">${[['liste', 'Spieler'], ['planer', 'Kaderplaner'], ['feld', 'Positionsplan']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/kader/${v}">${l}</button>`).join('')}</div>`;
-  if (sub === 'planer') h += kaderPlaner();
-  else if (sub === 'feld') h += positionsPlan();
-  else h += kaderListe();
-  return { title: 'Kader & Mannschaft', html: h, fab: sub === 'feld' ? null : 'newPlayer' };
+  const sub = parts[0] || 'feld';
+  let h = `<div class="seg">${[['feld', 'Feld'], ['tiers', 'Tiers'], ['positionen', 'Positionen'], ['liste', 'Liste']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/kader/${v}">${l}</button>`).join('')}</div>`;
+  if (sub === 'tiers') h += tierBoard();
+  else if (sub === 'positionen') h += posMatrix();
+  else if (sub === 'liste') h += kaderListe();
+  else h += pitchView();
+  return { title: 'Kader & Mannschaft', html: h, fab: sub === 'liste' || sub === 'tiers' ? 'newPlayer' : null, actions: crestBtn() };
+}
+const tierLegend = () => `<div class="legend" style="margin:8px 4px 2px">${TIERS.slice(0, 4).map(t => `<span><span class="dot" style="background:${t.c};width:9px;height:9px"></span> ${esc(t.l)}</span>`).join('')}
+  <span><span class="pos l1">Stamm</span></span><span><span class="pos l2">in Frage</span> = eine Stufe tiefer</span></div>`;
+function eligible(posKey, maxRank = 2) {
+  return players().map(p => ({ p, e: effTier(p, posKey) })).filter(x => x.e && x.e.rank <= maxRank)
+    .sort((a, b) => a.e.rank - b.e.rank || a.e.lv - b.e.lv || tierIdx(a.p) - tierIdx(b.p) || byName(a.p, b.p));
+}
+function pchip(p, e) {
+  const t = tierOf(e.tier);
+  return `<span class="pchip ${e.lv === 2 ? 'frage' : ''}" style="--tc:${t.c};--tb:${t.bg}" title="${esc(POSVLV[e.lv])} · ${esc(t.l)}${p.number ? ' · #' + esc(p.number) : ''}">${esc(p.short || p.name)}</span>`;
+}
+function pitchView() {
+  let h = `<div class="pitch2">`;
+  for (const row of PITCH) {
+    for (const [k, a, b] of row) {
+      const P = posvOf(k), list = eligible(k);
+      h += `<div class="pbox" style="grid-column:${a}/${b}" data-a="posSheet" data-k="${k}">
+        <div class="pl2"><b>${esc(P.l)}</b> <span>${esc(P.f.replace(/ \(.*\)$/, ''))}</span><em>${list.length || ''}</em></div>
+        <div class="pchips">${list.map(x => pchip(x.p, x.e)).join('') || '<span class="tiny mute">niemand</span>'}</div></div>`;
+    }
+  }
+  h += `</div>${tierLegend()}<div class="tiny mute" style="margin:6px 4px">Zu sehen ist jeder, der auf der Position mindestens „Okay“ ist. Position antippen, um Stamm / in Frage zu ändern.</div>`;
+  const none = players().filter(p => !Object.keys(p.posv || {}).length);
+  if (none.length) h += sec('Ohne Positionen') + `<div class="card">${none.map(p => `<span class="pill" data-a="editPlayer" data-id="${esc(p.id)}">${esc(p.name)}</span>`).join('')}</div>`;
+  return h;
+}
+function posSheet(k) {
+  const P = posvOf(k), ps = players().slice().sort((a, b) => tierIdx(a) - tierIdx(b) || byName(a, b));
+  const row = p => {
+    const lv = (p.posv || {})[k] || 0, e = effTier(p, k), t = tierOf(p.tier);
+    return `<div class="li" style="padding:7px 2px"><span class="dot" style="background:${t.c}"></span><div class="grow"><div class="t">${esc(p.name)} <span class="tiny mute">${esc(t.l)}</span></div>
+      <div class="s">${e ? (e.tier ? 'auf dieser Position: <b style="color:' + tierOf(e.tier).c + '">' + esc(tierOf(e.tier).l) + '</b>' : 'auf dieser Position: zu schwach') : '–'}</div></div>
+      <div class="lvseg">${[[1, 'Stamm'], [2, 'in Frage'], [0, '–']].map(([v, l]) => `<button class="${lv === v ? 'on' : ''}" data-a="setPos" data-id="${esc(p.id)}" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
+  };
+  const on = ps.filter(p => (p.posv || {})[k]), off = ps.filter(p => !(p.posv || {})[k]);
+  Sheet.open(`${P.l} · ${P.f}`, `<div class="card list">${on.map(row).join('') || '<div class="mute small">Noch niemand auf dieser Position.</div>'}</div>
+    ${sec('Weitere Spieler')}<div class="card list">${off.map(row).join('')}</div>`);
+}
+function tierBoard() {
+  const ps = players();
+  let h = `<div class="small mute" style="margin:0 4px 8px">Spieler gedrückt halten und in eine andere Zeile ziehen – oder antippen und die Stufe wählen.</div>
+    <div class="board"><div></div>${GROUPS.map(g => `<div class="h">${GROUPL[g]} <span>${ps.filter(p => p.group === g).length}</span></div>`).join('')}`;
+  for (const t of TIERS) {
+    const row = ps.filter(p => (p.tier || '') === t.k);
+    if (!t.k && !row.length) continue;
+    h += `<div class="rl" style="background:${t.c}">${esc(t.s)}<span>${row.length}</span></div>`;
+    for (const g of GROUPS) h += `<div class="cell" data-drop="1" data-tier="${t.k}" data-group="${g}" style="--tb:${t.bg}">${row.filter(p => p.group === g).map(p => `<div class="nm" data-drag="${esc(p.id)}">${esc(p.short || p.name)}${p.number ? `<i>${esc(p.number)}</i>` : ''}</div>`).join('')}</div>`;
+  }
+  const noGroup = ps.filter(p => !p.group);
+  h += `</div>${noGroup.length ? `<div class="small mute" style="margin-top:10px">Ohne Mannschaftsteil: ${noGroup.map(p => `<a class="link" data-a="quickTier" data-id="${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}`;
+  h += sec('Tiefe pro Position') + `<div class="card"><div class="depth">${POSV.map(P => {
+    const c = r => eligible(P.k).filter(x => x.e.rank === r).length;
+    return `<div class="drow" data-a="posSheet" data-k="${P.k}"><b>${esc(P.l)}</b><span class="dn">${[0, 1, 2].map(r => `<span style="background:${TIERS[r].c};opacity:${c(r) ? 1 : .18}">${c(r)}</span>`).join('')}</span></div>`;
+  }).join('')}</div><div class="tiny mute" style="margin-top:8px">Anzahl Spieler je Position: <b style="color:${TIERS[0].c}">Top</b> · <b style="color:${TIERS[1].c}">Gut</b> · <b style="color:${TIERS[2].c}">Okay</b> – zeigt, wo der Kader dünn ist.</div></div>`;
+  return h;
+}
+function quickTier(id) {
+  const p = Store.get(id); if (!p) return;
+  Sheet.open(p.name, `<div class="lab small mute" style="margin-bottom:6px">Einstufung</div>
+    <div class="tierbtns">${TIERS.map(t => `<button class="${(p.tier || '') === t.k ? 'on' : ''}" style="--tc:${t.c}" data-a="setTier" data-id="${esc(id)}" data-t="${t.k}">${esc(t.l)}</button>`).join('')}</div>
+    <div class="lab small mute" style="margin:14px 0 6px">Mannschaftsteil</div>
+    <div class="tierbtns">${GROUPS.map(g => `<button class="${p.group === g ? 'on' : ''}" style="--tc:var(--accent)" data-a="setGroup" data-id="${esc(id)}" data-g="${g}">${GROUPL[g]}</button>`).join('')}</div>
+    <div class="lab small mute" style="margin:14px 0 6px">Positionen</div><div>${posChips(p, 15) || '<span class="tiny mute">keine</span>'}</div>`,
+    `<button class="btn primary" data-a="editPlayer" data-id="${esc(id)}">${icon('edit')} Profil bearbeiten</button>`);
+}
+function posMatrix() {
+  const ps = players().sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || tierIdx(a) - tierIdx(b) || byName(a, b));
+  return `<div class="small mute" style="margin:0 4px 8px">Zelle antippen: – → <b>S</b> (Stamm) → <b>F</b> (in Frage) → –. Wird sofort gespeichert.</div>
+    <div class="matrix"><table><thead><tr><th></th>${POSV.map(P => `<th title="${esc(P.f)}">${esc(P.l)}</th>`).join('')}</tr></thead><tbody>
+    ${ps.map(p => `<tr><th><span class="dot" style="background:${tierOf(p.tier).c};width:8px;height:8px"></span> ${esc(p.short || p.name)}</th>${POSV.map(P => {
+      const lv = (p.posv || {})[P.k] || 0, e = effTier(p, P.k), t = e && e.tier ? tierOf(e.tier) : null;
+      return `<td class="mx l${lv}" data-a="mxCycle" data-id="${esc(p.id)}" data-k="${P.k}" style="${t ? `--tc:${t.c};--tb:${t.bg}` : ''}">${lv === 1 ? 'S' : lv === 2 ? 'F' : ''}</td>`;
+    }).join('')}</tr>`).join('')}</tbody></table></div>${tierLegend()}`;
 }
 function kaderListe() {
   const f = UI.kader;
   let ps = players();
   if (f.grp) ps = ps.filter(p => p.group === f.grp);
-  if (f.q) ps = ps.filter(p => (p.name + ' ' + p.short).toLowerCase().includes(f.q));
+  if (f.q) ps = ps.filter(p => (p.name + ' ' + (p.short || '') + ' ' + (p.number || '')).toLowerCase().includes(f.q));
   let h = `<input class="search" type="search" placeholder="Spieler suchen…" value="${esc(f.q)}" data-a="kQ"><div id="results">`;
   h += chips([['', `Alle (${players().length})`], ...GROUPS.map(g => [g, GROUPL[g]])], f.grp, 'kGrp');
   for (const t of TIERS) {
-    const list = ps.filter(p => (p.tier || '') === t.k); if (!list.length) continue;
+    const list = ps.filter(p => (p.tier || '') === t.k).sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || byName(a, b)); if (!list.length) continue;
     h += `<div class="sec"><span class="dot" style="background:${t.c}"></span><span class="grow">${esc(t.l)} · ${list.length}</span></div><div class="card list">`;
-    h += list.map(p => `<div class="pl" data-a="editPlayer" data-id="${esc(p.id)}"><span class="dot" style="background:${t.c}"></span>
-      <div class="grow"><div class="t ell">${esc(p.name)}${p.number ? ` <span class="mute">#${esc(p.number)}</span>` : ''}</div>
-      <div class="tiny mute" style="margin-top:3px">${esc(GROUPL[p.group] || 'keine Gruppe')}${p.stp ? ' · Stützpunkt' : ''}${p.note ? ' · ' + esc(p.note) : ''}</div></div>
-      <div style="text-align:right">${posChips(p)}</div></div>`).join('');
+    h += list.map(p => `<div class="pl" data-a="editPlayer" data-id="${esc(p.id)}"><span class="num" style="background:${t.c}">${esc(p.number || '?')}</span>
+      <div class="grow"><div class="t ell">${esc(p.name)}</div><div class="tiny mute" style="margin-top:2px">${esc(GROUPL[p.group] || 'keine Gruppe')}${p.note ? ' · ' + esc(p.note) : ''}</div>
+      <div style="margin-top:5px">${posChips(p)}</div></div>
+      <div class="updown"><button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="-1" ${tierIdx(p) === 0 ? 'disabled' : ''} aria-label="Höher einstufen">${icon('up')}</button>
+      <button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="1" ${tierIdx(p) >= 3 && p.tier ? 'disabled' : ''} aria-label="Tiefer einstufen">${icon('down')}</button></div></div>`).join('');
     h += '</div>';
   }
   if (!ps.length) h += '<div class="empty">Keine Spieler gefunden.</div>';
   return h + '</div>';
 }
-function kaderPlaner() {
-  const ps = players();
-  let h = `<div class="card"><div class="small mute" style="margin-bottom:10px">Einstufung × Mannschaftsteil – wie im Excel-Kaderplaner. Name antippen zum Ändern.</div><div class="planner">
-    <div></div>${GROUPS.map(g => `<div class="h">${GROUPL[g]}<br>${ps.filter(p => p.group === g).length}</div>`).join('')}`;
-  for (const t of TIERS) {
-    const row = ps.filter(p => (p.tier || '') === t.k); if (!row.length && !['top', 'good', 'okay', 'q'].includes(t.k)) continue;
-    h += `<div class="rl" style="background:${t.c}">${esc(t.k ? t.l : 'Ohne')}<span style="opacity:.85;font-weight:600">${row.length}</span></div>`;
-    for (const g of GROUPS) h += `<div class="cell">${row.filter(p => p.group === g).map(p => `<div class="nm" data-a="editPlayer" data-id="${esc(p.id)}">${esc(p.short || p.name)}</div>`).join('')}</div>`;
-  }
-  const noGroup = ps.filter(p => !p.group);
-  h += `</div>${noGroup.length ? `<div class="small mute" style="margin-top:10px">Ohne Mannschaftsteil: ${noGroup.map(p => `<a class="link" data-a="editPlayer" data-id="${esc(p.id)}">${esc(p.short || p.name)}</a>`).join(', ')}</div>` : ''}
-    <div class="small" style="margin-top:10px"><b>${ps.length}</b> Spieler gesamt</div></div>`;
-  h += sec('Positionsprofil') + `<div class="card"><div class="planner" style="grid-template-columns:62px repeat(7,1fr)"><div></div>${POS.map(p => `<div class="h">${p.l}</div>`).join('')}
-    ${[1, 2, 3].map(l => `<div class="rl" style="background:var(--accent)">${POSLV[l]}</div>${POS.map(p => `<div class="cell" style="align-items:center;justify-content:center;font-weight:800">${ps.filter(x => (x.pos || {})[p.k] === l).length || ''}</div>`).join('')}`).join('')}</div>
-    <div class="tiny mute" style="margin-top:8px">Anzahl Spieler je Position (Haupt / Gut / Möglich) – zeigt schnell, wo der Kader dünn ist.</div></div>`;
-  return h;
-}
-function lineup() { return Store.data('lineup:main') || { slots: {} }; }
-function positionsPlan() {
-  const lu = lineup().slots || {};
-  let h = `<div class="pitch"><svg class="lines" viewBox="0 0 68 100" preserveAspectRatio="none">
-    <rect x="2" y="2" width="64" height="96"/><line x1="2" y1="50" x2="66" y2="50"/><circle cx="34" cy="50" r="8"/>
-    <rect x="15" y="2" width="38" height="15"/><rect x="25" y="2" width="18" height="5"/><rect x="15" y="83" width="38" height="15"/><rect x="25" y="93" width="18" height="5"/></svg>`;
-  for (const s of SLOTS) {
-    const ids = (lu[s.k] || []).filter(id => Store.items.has(id));
-    const t1 = ids[0] ? tierOf(Store.data(ids[0]).tier) : null;
-    h += `<div class="slot ${ids.length ? '' : 'empty'}" style="left:${s.x}%;top:${s.y}%" data-a="slot" data-k="${s.k}">
-      <div class="sl">${esc(s.s || s.l)}</div><div class="n1">${ids[0] ? `<span class="dot" style="background:${t1.c};width:7px;height:7px;margin-right:3px"></span>${esc(playerName(ids[0]))}` : '–'}</div>
-      ${ids[1] ? `<div class="n2"><i>2.</i> ${esc(playerName(ids[1]))}${ids.length > 2 ? ` <i>+${ids.length - 2}</i>` : ''}</div>` : ''}</div>`;
-  }
-  h += '</div><div class="tiny mute" style="margin:8px 4px">Position antippen: Reihenfolge ändern, Spieler hinzufügen oder entfernen. Punktfarbe = Einstufung.</div>';
-  const used = new Set(Object.values(lu).flat());
-  const free = players().filter(p => !used.has(p.id));
-  if (free.length) h += sec('Noch ohne Position') + `<div class="card">${free.map(p => `<span class="pill" data-a="editPlayer" data-id="${esc(p.id)}">${esc(p.short || p.name)}</span>`).join('')}</div>`;
-  return h;
-}
-function slotSheet(k) {
-  const s = SLOTS.find(x => x.k === k), lu = lineup(), ids = (lu.slots[k] || []).filter(id => Store.items.has(id));
-  const score = p => Math.min(...s.pos.map((pk, i) => (p.pos || {})[pk] ? (p.pos[pk] + i * 0.5) : 9));
-  const others = players().filter(p => !ids.includes(p.id)).map(p => ({ p, sc: score(p) })).sort((a, b) => a.sc - b.sc || byName(a.p, b.p));
-  const body = `<div class="small mute" style="margin-bottom:8px">Reihenfolge = Rangfolge für diese Position.</div>
-    <div class="card list slotlist">${ids.map((id, i) => `<div class="li"><span class="rank">${i + 1}</span><div class="grow"><div class="t">${esc(Store.data(id).name)}</div><div class="s">${posChips(Store.get(id))}</div></div>
-      <button class="iconbtn" data-a="slotMove" data-k="${k}" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''}>${icon('up', '')}</button>
-      <button class="iconbtn" data-a="slotMove" data-k="${k}" data-i="${i}" data-d="1" ${i === ids.length - 1 ? 'disabled' : ''}>${icon('down', '')}</button>
-      <button class="iconbtn" data-a="slotDel" data-k="${k}" data-i="${i}" style="color:var(--danger)">${icon('trash')}</button></div>`).join('') || '<div class="mute small">Noch niemand eingetragen.</div>'}</div>
-    ${sec('Hinzufügen')}<div class="card list">${others.map(({ p, sc }) => `<div class="li" data-a="slotAdd" data-k="${k}" data-id="${esc(p.id)}"><span class="dot" style="background:${tierOf(p.tier).c}"></span>
-      <div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${posChips(p) || 'kein Positionsprofil'}</div></div>${sc < 9 ? badge('passt', 'var(--accent)') : ''}${icon('plus', 'chev')}</div>`).join('')}</div>`;
-  Sheet.open(s.l, body);
-}
 function playerForm(p = {}, isNew) {
   openForm({
     title: isNew ? 'Neuer Spieler' : p.name, value: { tier: '', group: '', ...p },
     fields: [
-      { k: 'name', l: 'Name', auto: isNew }, [{ k: 'short', l: 'Rufname (für Aufstellung)' }, { k: 'number', l: 'Rückennummer', t: 'number' }],
+      [{ k: 'name', l: 'Vorname / Rufname', auto: isNew }, { k: 'number', l: 'Rückennummer', t: 'number' }],
       { k: 'tier', l: 'Einstufung', t: 'seg', opts: TIERS.map(t => [t.k, t.l]) },
       { k: 'group', l: 'Mannschaftsteil', t: 'seg', opts: [...GROUPS.map(g => [g, GROUPL[g]]), ['', 'keiner']] },
-      { k: 'pos', l: 'Positionen', t: 'pos' },
+      { k: 'posv', l: 'Positionen', t: 'posv' },
       { k: 'stp', l: 'Stützpunkt', t: 'toggle' },
       { k: 'note', l: 'Notiz', t: 'textarea' }],
     onSave: async v => {
       if (!v.name) return toast('Bitte einen Namen eingeben');
-      if (!v.short) v.short = v.name.split(' ')[0];
+      v.short = v.name;
       Store.put(p.id || uid('player'), 'player', { ...(p.id ? Store.data(p.id) : {}), ...v }); await Sheet.close(); render();
     },
-    onDelete: isNew ? null : async () => {
-      if (!confirmDel(p.name)) return;
-      const lu = lineup(); for (const k in lu.slots) lu.slots[k] = lu.slots[k].filter(x => x !== p.id);
-      Store.put('lineup:main', 'lineup', lu); Store.remove(p.id); await Sheet.close(); render();
-    },
+    onDelete: isNew ? null : async () => { if (!confirmDel(p.name)) return; Store.remove(p.id); await Sheet.close(); render(); },
   });
 }
-
+// Ziehen & Ablegen im Tier-Board (Maus + Touch, Touch per langem Drücken)
+const Drag = { el: null, id: null, ghost: null, timer: null, start: null, active: false };
+function dragEnd(commit, x, y) {
+  clearTimeout(Drag.timer);
+  const wasActive = Drag.active, id = Drag.id;
+  if (Drag.ghost) Drag.ghost.remove();
+  $$('.cell.over').forEach(c => c.classList.remove('over'));
+  Drag.el && Drag.el.classList.remove('lifted');
+  Object.assign(Drag, { el: null, id: null, ghost: null, timer: null, start: null, active: false });
+  if (!commit || !id) return;
+  if (!wasActive) return quickTier(id);
+  const t = document.elementFromPoint(x, y)?.closest('[data-drop]');
+  if (!t) return;
+  const p = Store.data(id); if (!p) return;
+  if ((p.tier || '') === t.dataset.tier && p.group === t.dataset.group) return;
+  Store.patch(id, 'player', { tier: t.dataset.tier, group: t.dataset.group });
+  toast(`${p.short || p.name} → ${tierOf(t.dataset.tier).l}`); render();
+}
+function dragActivate(x, y) {
+  Drag.active = true; Drag.el.classList.add('lifted');
+  const g = Drag.el.cloneNode(true); g.className = 'nm ghost'; document.body.appendChild(g); Drag.ghost = g;
+  dragMove(x, y); if (navigator.vibrate) navigator.vibrate(15);
+}
+function dragMove(x, y) {
+  if (!Drag.ghost) return;
+  Drag.ghost.style.left = x + 'px'; Drag.ghost.style.top = y + 'px';
+  $$('.cell.over').forEach(c => c.classList.remove('over'));
+  Drag.ghost.style.display = 'none'; const t = document.elementFromPoint(x, y)?.closest('[data-drop]'); Drag.ghost.style.display = '';
+  t && t.classList.add('over');
+}
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('[data-drag]'); if (!el) return;
+  Object.assign(Drag, { el, id: el.dataset.drag, start: [e.clientX, e.clientY], active: false, touch: e.pointerType !== 'mouse' });
+  if (Drag.touch) Drag.timer = setTimeout(() => dragActivate(Drag.start[0], Drag.start[1]), 320);
+});
+document.addEventListener('pointermove', e => {
+  if (!Drag.el) return;
+  const dx = e.clientX - Drag.start[0], dy = e.clientY - Drag.start[1], far = Math.hypot(dx, dy) > 8;
+  if (!Drag.active) { if (far) { if (Drag.touch) { dragEnd(false); } else dragActivate(e.clientX, e.clientY); } return; }
+  e.preventDefault(); dragMove(e.clientX, e.clientY);
+});
+document.addEventListener('pointerup', e => { if (Drag.el) dragEnd(true, e.clientX, e.clientY); });
+document.addEventListener('pointercancel', () => { if (Drag.el && !Drag.active) dragEnd(false); });
+document.addEventListener('touchmove', e => {
+  if (!Drag.active) return; e.preventDefault();
+  const t = e.touches[0]; Drag.last = [t.clientX, t.clientY]; dragMove(t.clientX, t.clientY);
+}, { passive: false });
+document.addEventListener('touchend', e => { if (Drag.active) { const t = e.changedTouches[0]; dragEnd(true, t.clientX, t.clientY); } });
+document.addEventListener('contextmenu', e => { if (e.target.closest('[data-drag]')) e.preventDefault(); });
 // ───────────────────────── Training ─────────────────────────
 function viewTraining(parts) {
   const sub = parts[0] || 'woche';
@@ -678,7 +844,7 @@ function viewTraining(parts) {
   else if (sub === 'athletik') { h += athleticList(); fab = 'newAthletic'; }
   else if (sub === 'themen') { h += topicList(); fab = 'newTopic'; }
   else h += trainingWeek(parts[1] || D.week(D.today()).key);
-  return { title: 'Training', html: h, fab };
+  return { title: 'Training', html: h, fab, actions: crestBtn() };
 }
 function mesoDistribution(p) {
   const cnt = {}; let total = 0;
@@ -874,35 +1040,39 @@ function sameClub(a, b) {
 }
 const findClub = name => name ? Store.all('club').find(c => normC(c.name) === normC(name)) || Store.all('club').find(c => sameClub(c.name, name)) : null;
 const contactsFor = name => name ? Store.all('contact').filter(c => c.club && sameClub(c.club, name)) : [];
+const TSTATUS = [
+  { k: 'callback', l: 'Zurückmelden', d: 'Hier müssen wir uns melden', c: '#d97706', f: c => c.callback && !c.done },
+  { k: 'open', l: 'Noch nicht angefragt', d: 'Kandidaten für die nächste Anfrage', c: '#5b4a8f', f: c => !c.requested && !c.callback && !c.done },
+  { k: 'requested', l: 'Angefragt – warten auf Antwort', d: '', c: '#0e7490', f: c => c.requested && !c.callback && !c.done },
+  { k: 'done', l: 'Vereinbart', d: '', c: '#15803d', f: c => c.done }];
+const LVC = { NLZ: '#312e81', Regio: '#7c3aed', VL: '#0e7490', BZL: '#15803d', SDL: '#a16207', '': '#94a3b8' };
+const lvlRank = k => { const i = LEVELS.findIndex(l => l.k === (k || '')); return i < 0 ? 99 : i; };
 function viewTests() {
-  const f = UI.tests;
-  let cl = Store.all('club').sort(byName);
+  const f = UI.tests; if (!(f.lvls instanceof Set)) f.lvls = new Set();
+  let cl = Store.all('club');
   const all = cl.length;
   if (f.q) cl = cl.filter(c => (c.name + ' ' + c.stadt + ' ' + c.kreis + ' ' + c.trainer).toLowerCase().includes(f.q));
-  if (f.st === 'requested') cl = cl.filter(c => c.requested && !c.done);
-  if (f.st === 'callback') cl = cl.filter(c => c.callback && !c.done);
-  if (f.st === 'done') cl = cl.filter(c => c.done);
-  if (f.st === 'open') cl = cl.filter(c => !c.requested && !c.done);
+  if (f.lvls.size) cl = cl.filter(c => f.lvls.has(c.level || ''));
+  cl.sort((a, b) => lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
   let h = `<input class="search" type="search" placeholder="Verein, Stadt, Kreis suchen…" value="${esc(f.q)}" data-a="tQ"><div id="results">`;
-  h += chips([['', `Alle (${all})`], ...LEVELS.filter(l => l.k).map(l => [l.k, l.k === 'Regio' ? 'Regio' : l.k])], f.lvl, 'tLvl');
-  h += chips([['', 'Jeder Status'], ['open', 'Noch nicht angefragt'], ['requested', 'Angefragt'], ['callback', 'Zurückmelden'], ['done', 'Vereinbart']], f.st, 'tSt');
-  for (const L of LEVELS) {
-    if (f.lvl && L.k !== f.lvl) continue;
-    const list = cl.filter(c => (c.level || '') === L.k); if (!list.length) continue;
-    h += sec(`${L.l} · ${list.length}`) + `<div class="card list">${list.map(clubRow).join('')}</div>`;
+  h += `<div class="chips wrapchips"><button class="chip ${f.lvls.size ? '' : 'on'}" data-a="tLvl" data-v="*">Alle Niveaus (${all})</button>${LEVELS.filter(l => l.k).map(l => `<button class="chip ${f.lvls.has(l.k) ? 'on' : ''}" data-a="tLvl" data-v="${l.k}">${esc(l.k)}</button>`).join('')}</div>`;
+  h += chips([['', 'Jeder Status'], ...TSTATUS.map(s => [s.k, s.l.split(' –')[0]])], f.st, 'tSt');
+  for (const S of TSTATUS) {
+    if (f.st && f.st !== S.k) continue;
+    const list = cl.filter(S.f); if (!list.length) continue;
+    h += `<div class="sec"><span class="dot" style="background:${S.c}"></span><span class="grow">${esc(S.l)} · ${list.length}</span></div>${S.d ? `<div class="tiny mute" style="margin:-4px 4px 6px">${esc(S.d)}</div>` : ''}
+      <div class="ctiles">${list.map(clubTile).join('')}</div>`;
   }
   if (!cl.length) h += '<div class="empty">Keine Vereine für diese Auswahl.</div>';
   h += '</div>';
-  return { title: 'Testspielplanung', html: h, fab: 'newClub' };
+  return { title: 'Testspielplanung', html: h, fab: 'newClub', actions: crestBtn() };
 }
-function clubRow(c) {
-  const n = contactsFor(c.name).length;
-  return `<div class="li" data-a="openClub" data-id="${esc(c.id)}"><div class="grow"><div class="t ell">${esc(c.name)}</div>
-    <div class="s ell">${esc([c.stadt || c.kreis, c.verband, c.jahrgang && 'Jg. ' + c.jahrgang].filter(Boolean).join(' · '))}${c.result ? ' · <b>' + esc(c.result) + '</b>' : ''}${n ? ` · ${cap(n, 'Kontakt', 'Kontakte')}` : ''}</div>
-    <div style="display:flex;gap:5px;margin-top:6px">
-      <button class="flagbtn ${c.requested ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="requested">angefragt</button>
-      <button class="flagbtn cb ${c.callback ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="callback">zurückmelden</button>
-      <button class="flagbtn ${c.done ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="done">vereinbart</button></div></div>${icon('chev', 'chev')}</div>`;
+function clubTile(c) {
+  const n = contactsFor(c.name).length, L = LEVELS.find(l => l.k === (c.level || ''));
+  return `<div class="ctile" data-a="openClub" data-id="${esc(c.id)}" style="--lc:${LVC[c.level || '']}">
+    <div class="row" style="gap:6px"><span class="lvb">${esc(c.level || '–')}</span>${n ? `<span class="tiny mute">${icon('phone', 'mini')}${n}</span>` : ''}${c.result ? `<span class="tiny" style="margin-left:auto;font-weight:700">${esc(c.result)}</span>` : ''}</div>
+    <div class="cn">${esc(c.name)}</div><div class="cp">${esc(c.stadt || c.kreis || L?.l || '')}</div>
+    <div class="cflags"><button class="flagbtn ${c.requested ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="requested">angefragt</button><button class="flagbtn cb ${c.callback ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="callback">melden</button><button class="flagbtn ok ${c.done ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="done">fix</button></div></div>`;
 }
 function clubDetail(id) {
   const c = Store.get(id); if (!c) return;
@@ -977,7 +1147,7 @@ function viewMehr(parts) {
     <div class="card small"><div class="row"><span class="grow">${REMOTE ? `Angemeldet als <b>${esc(Store.user?.email || '')}</b>` : '<b>Lokaler Testmodus</b> – Daten nur in diesem Browser'}</span></div>
     ${REMOTE ? `<button class="btn sm" data-a="logout" style="margin-top:10px">Abmelden</button>` : ''}</div>
     <div class="tiny mute" style="text-align:center">Coaching-App · Version ${VERSION}</div>`;
-  return { title: 'Mehr', html };
+  return { title: 'Mehr', html, actions: crestBtn() };
 }
 function viewMaterial() {
   const tab = UI.mat, all = Store.all('material').sort(byOrder);
@@ -1070,11 +1240,12 @@ const A = {
   tab: el => go('#/' + el.dataset.k),
   open: el => go(el.dataset.h),
   back: () => history.length > 1 ? history.back() : go('#/saison'),
+  syncInfo: () => toast(!REMOTE ? 'Lokaler Testmodus' : Store.error ? 'Fehler: ' + Store.error : Object.keys(Store.pending).length ? 'Speichert…' : 'Alles gespeichert ✓'),
   sheetClose: () => Sheet.close(),
   formSave: () => FORM && FORM.onSave(readForm()),
   formDelete: () => FORM && FORM.onDelete && FORM.onDelete(),
   fitCycle: el => { const g = el.closest('[data-fit]'), v = JSON.parse(g.dataset.val), n = el.dataset.n, s = ((v[n] || 0) + 1) % 4; if (s) v[n] = s; else delete v[n]; g.dataset.val = JSON.stringify(v); el.className = 'fit' + s; },
-  posCycle: el => { const g = el.closest('[data-pos]'), v = JSON.parse(g.dataset.val), p = el.dataset.p, s = ((v[p] || 0) + 1) % 4; if (s) v[p] = s; else delete v[p]; g.dataset.val = JSON.stringify(v); el.className = s ? 'l' + s : ''; el.querySelector('span').textContent = s ? POSLV[s] : '–'; },
+  posvCycle: el => { const g = el.closest('[data-posv]'), v = JSON.parse(g.dataset.val), p = el.dataset.p, s = ((v[p] || 0) + 1) % 3; if (s) v[p] = s; else delete v[p]; g.dataset.val = JSON.stringify(v); el.className = s ? 'l' + s : ''; el.querySelector('span').textContent = s ? POSVLV[s] : '–'; },
   // Saison
   ptask: el => { const t = Store.data(el.dataset.id); Store.patch(el.dataset.id, 'ptask', { done: !t.done }); if (!t.done) toast('Erledigt ✓'); render(); },
   wtask: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.tasks = { ...(w.tasks || {}) }; w.tasks[el.dataset.id] = !w.tasks[el.dataset.id]; Store.put('week:' + k, 'week', w); render(); },
@@ -1102,7 +1273,7 @@ const A = {
     const g = Store.get(el.dataset.id), max = setting().squadMax || 17;
     openForm({
       title: 'Spieltagskader', value: { sq: g.squad || [] }, saveLabel: 'Übernehmen',
-      fields: [{ k: 'sq', t: 'multi', max, opts: players().sort((a, b) => TIERS.findIndex(t => t.k === (a.tier || '')) - TIERS.findIndex(t => t.k === (b.tier || '')) || byName(a, b)).map(p => ({ v: p.id, l: p.name, s: Object.keys(p.pos || {}).map(k => POS.find(x => x.k === k)?.l).join(' '), g: tierOf(p.tier).l })) }],
+      fields: [{ k: 'sq', t: 'multi', max, opts: players().sort((a, b) => tierIdx(a) - tierIdx(b) || byName(a, b)).map(p => ({ v: p.id, l: p.name, s: posText(p), g: tierOf(p.tier).l })) }],
       onSave: async v => { Store.patch(g.id, 'game', { squad: v.sq, start11: (g.start11 || []).filter(x => v.sq.includes(x)) }); await Sheet.close(); render(); },
     });
   },
@@ -1110,7 +1281,7 @@ const A = {
     const g = Store.get(el.dataset.id), pool = (g.squad || []).length ? g.squad.map(id => Store.get(id)).filter(Boolean) : players();
     openForm({
       title: 'Startelf', value: { st: g.start11 || [] }, saveLabel: 'Übernehmen',
-      fields: [{ k: 'st', t: 'multi', max: 11, opts: pool.sort(byName).map(p => ({ v: p.id, l: p.name, s: Object.keys(p.pos || {}).map(k => POS.find(x => x.k === k)?.l).join(' ') })) }],
+      fields: [{ k: 'st', t: 'multi', max: 11, opts: pool.sort(byName).map(p => ({ v: p.id, l: p.name, s: posText(p) })) }],
       onSave: async v => { Store.patch(g.id, 'game', { start11: v.st }); await Sheet.close(); render(); },
     });
   },
@@ -1119,10 +1290,14 @@ const A = {
   kGrp: el => { UI.kader.grp = el.dataset.v; render(); },
   newPlayer: () => playerForm({}, true),
   editPlayer: el => playerForm(Store.get(el.dataset.id)),
-  slot: el => slotSheet(el.dataset.k),
-  slotAdd: el => { const lu = lineup(), k = el.dataset.k; lu.slots = { ...lu.slots, [k]: [...(lu.slots[k] || []), el.dataset.id] }; Store.put('lineup:main', 'lineup', lu); slotSheet(k); render(); },
-  slotDel: el => { const lu = lineup(), k = el.dataset.k, a = [...(lu.slots[k] || [])]; a.splice(+el.dataset.i, 1); lu.slots = { ...lu.slots, [k]: a }; Store.put('lineup:main', 'lineup', lu); slotSheet(k); render(); },
-  slotMove: el => { const lu = lineup(), k = el.dataset.k, a = [...(lu.slots[k] || [])], i = +el.dataset.i, j = i + +el.dataset.d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; lu.slots = { ...lu.slots, [k]: a }; Store.put('lineup:main', 'lineup', lu); slotSheet(k); render(); },
+  posSheet: el => posSheet(el.dataset.k),
+  setPos: el => { const p = Store.data(el.dataset.id), pv = { ...(p.posv || {}) }, v = +el.dataset.v; if (v) pv[el.dataset.k] = v; else delete pv[el.dataset.k]; Store.patch(el.dataset.id, 'player', { posv: pv }); posSheet(el.dataset.k); render(); },
+  mxCycle: el => { const p = Store.data(el.dataset.id), pv = { ...(p.posv || {}) }, k = el.dataset.k, s = ((pv[k] || 0) + 1) % 3; if (s) pv[k] = s; else delete pv[k]; Store.patch(el.dataset.id, 'player', { posv: pv }); render(); },
+  quickTier: el => quickTier(el.dataset.id),
+  setTier: el => { Store.patch(el.dataset.id, 'player', { tier: el.dataset.t }); quickTier(el.dataset.id); render(); },
+  setGroup: el => { Store.patch(el.dataset.id, 'player', { group: el.dataset.g }); quickTier(el.dataset.id); render(); },
+  tierMove: el => { const p = Store.data(el.dataset.id), i = TIER_RANK.indexOf(p.tier || ''), j = i < 0 ? 3 : Math.max(0, Math.min(3, i + +el.dataset.d)); Store.patch(el.dataset.id, 'player', { tier: TIER_RANK[j] }); toast(`${p.short || p.name} → ${tierOf(TIER_RANK[j]).l}`); render(); },
+  quickResult: el => resultForm(Store.get(el.dataset.id)),
   // Training
   dayPhase: el => { const k = el.dataset.week, d = el.dataset.day, cur = ((weekData(k).days || {})[d] || {}).phase; setDay(k, d, { phase: cur === el.dataset.ph ? '' : el.dataset.ph }); render(); },
   pickDay: el => pickDay(el.dataset.what, el.dataset.week, el.dataset.day),
@@ -1142,7 +1317,7 @@ const A = {
   newTopic: () => topicForm({}, true),
   editTopic: el => topicForm(Store.get(el.dataset.id)),
   // Testspiele
-  tLvl: el => { UI.tests.lvl = el.dataset.v; render(); },
+  tLvl: el => { const L = UI.tests.lvls instanceof Set ? UI.tests.lvls : (UI.tests.lvls = new Set()), v = el.dataset.v; if (v === '*') L.clear(); else if (L.has(v)) L.delete(v); else L.add(v); render(); },
   tSt: el => { UI.tests.st = el.dataset.v; render(); },
   clubFlag: (el, ev) => { ev.stopPropagation(); const c = Store.data(el.dataset.id), f = el.dataset.f; Store.patch(el.dataset.id, 'club', { [f]: !c[f] }); render(); },
   openClub: el => clubDetail(el.dataset.id),
@@ -1252,7 +1427,7 @@ async function importFile(file) {
     const existing = data.items.filter(it => Store.items.has(it.id)).length;
     if (existing && !confirm(`${existing} von ${data.items.length} Einträgen gibt es schon. Mit den Werten aus der Datei überschreiben?`)) return;
     for (const it of data.items) Store.put(it.id, it.kind, it.data, true);
-    toast(`${data.items.length} Einträge importiert`);
+    migratePositions(); toast(`${data.items.length} Einträge importiert`);
     await Store.flush(); render();
   } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
 }
@@ -1275,9 +1450,9 @@ function showLogin(msg = '') {
 }
 async function startApp(user) {
   Store.user = user || null; $('#top').style.display = '';
-  Store.restore(); render();
+  Store.restore(); migratePositions(); render();
   if (REMOTE) {
-    try { await Store.fetchAll(); Store.error = ''; } catch (e) { Store.error = e.message; }
+    try { await Store.fetchAll(); Store.error = ''; migratePositions(); } catch (e) { Store.error = e.message; }
     render(); Store.flush();
   }
 }
