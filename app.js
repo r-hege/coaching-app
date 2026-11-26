@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.1';
+const VERSION = '1.2';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -42,16 +42,18 @@ const D = {
 const WD = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
 // ───────────────────────── Fachliche Konstanten ─────────────────────────
+// Spielphasen: interne Schlüssel bleiben (Daten), angezeigt werden die Kürzel s
 const GP = {
-  EBB: { l: 'Eigener Ballbesitz', c: '#2563eb' },
-  GBB: { l: 'Gegnerischer Ballbesitz', c: '#dc2626' },
-  UBV: { l: 'Umschalten nach Ballverlust', c: '#ea580c' },
-  UBG: { l: 'Umschalten nach Ballgewinn', c: '#16a34a' },
-  STD: { l: 'Standards', c: '#7c3aed' },
-  ATH: { l: 'Athletik', c: '#0891b2' },
-  FREI: { l: 'Trainingsfrei', c: '#94a3b8' },
+  EBB: { s: 'B+', l: 'Eigener Ballbesitz', c: '#2563eb' },
+  GBB: { s: 'B−', l: 'Gegnerischer Ballbesitz', c: '#dc2626' },
+  UBG: { s: 'U+', l: 'Umschalten nach Ballgewinn', c: '#16a34a' },
+  UBV: { s: 'U−', l: 'Umschalten nach Ballverlust', c: '#ea580c' },
+  STD: { s: 'S', l: 'Standards', c: '#7c3aed' },
+  ATH: { s: 'ATH', l: 'Athletik', c: '#0891b2' },
+  FREI: { s: 'frei', l: 'Trainingsfrei', c: '#94a3b8' },
 };
-const GP5 = ['EBB', 'GBB', 'UBV', 'UBG', 'STD'];
+const GP5 = ['EBB', 'GBB', 'UBG', 'UBV', 'STD'];
+const gpS = k => GP[k]?.s || k;
 const TIERS = [
   { k: 'top', l: 'Top Tier', s: 'Top', c: '#1e40af', bg: '#dbe4ff' }, { k: 'good', l: 'Gut', s: 'Gut', c: '#15803d', bg: '#dcf3e3' },
   { k: 'okay', l: 'Okay', s: 'Okay', c: '#ca8a04', bg: '#fdf1cf' }, { k: 'q', l: '?', s: '?', c: '#d2544a', bg: '#fbe1de' },
@@ -70,7 +72,7 @@ const POSV = [
   { k: 'LIV', l: 'LIV', f: 'Linker Innenverteidiger', g: 'Abwehr' }, { k: 'ZIV', l: 'ZIV', f: 'Zentraler Innenverteidiger', g: 'Abwehr' },
   { k: 'RIV', l: 'RIV', f: 'Rechter Innenverteidiger', g: 'Abwehr' },
   { k: 'LV', l: 'LV', f: 'Linksverteidiger (Viererkette)', g: 'Abwehr' }, { k: 'RV', l: 'RV', f: 'Rechtsverteidiger (Viererkette)', g: 'Abwehr' },
-  { k: 'LS', l: 'LS', f: 'Linke Schiene (Dreierkette)', g: 'Abwehr' }, { k: 'RS', l: 'RS', f: 'Rechte Schiene (Dreierkette)', g: 'Abwehr' },
+  { k: 'LS', l: 'LAV', f: 'Linker Außenverteidiger', g: 'Abwehr' }, { k: 'RS', l: 'RAV', f: 'Rechter Außenverteidiger', g: 'Abwehr' },
   { k: 'SECHS', l: '6', f: 'Defensives Mittelfeld (6)', g: 'Mittelfeld' }, { k: 'ACHT', l: '8', f: 'Zentrales Mittelfeld (8)', g: 'Mittelfeld' },
   { k: 'ZEHN', l: '10', f: 'Offensives Mittelfeld (10)', g: 'Mittelfeld' },
   { k: 'LF', l: 'LF', f: 'Linker Flügel', g: 'Angriff' }, { k: 'RF', l: 'RF', f: 'Rechter Flügel', g: 'Angriff' },
@@ -80,13 +82,17 @@ const POSVLV = { 1: 'Stamm', 2: 'in Frage' };
 const GROUPS = ['TW', 'Abwehr', 'Mittelfeld', 'Sturm'];
 const GROUPL = { TW: 'Torwart', Abwehr: 'Abwehr', Mittelfeld: 'Mittelfeld', Sturm: 'Sturm' };
 // Feld-Anordnung (6er-Raster): [Position, Spalte von, Spalte bis]
-const PITCH = [
-  [['LF', 1, 3], ['NEUN', 3, 5], ['RF', 5, 7]],
-  [['ACHTFUENF', 2, 4], ['ZEHN', 4, 6]],
-  [['LS', 1, 3], ['ACHT', 3, 5], ['RS', 5, 7]],
-  [['LV', 1, 3], ['SECHS', 3, 5], ['RV', 5, 7]],
-  [['LIV', 1, 3], ['ZIV', 3, 5], ['RIV', 5, 7]],
-  [['TW', 3, 5]]];
+// Feld: 10er-Raster = 5 Zonen (Außen · Halbraum · Zentrum · Halbraum · Außen) à 2 Spalten.
+// Obere Hälfte: Angriff, 8,5/10, 8 · untere Hälfte: LAV/6/RAV, Abwehrreihe, TW
+const PITCH_TOP = [
+  [['LF', 1, 4], ['NEUN', 4, 8], ['RF', 8, 11]],
+  [['ACHTFUENF', 2, 6], ['ZEHN', 6, 10]],
+  [['ACHT', 3, 9]]];
+const PITCH_BOT = [
+  [['LS', 1, 4], ['SECHS', 4, 8], ['RS', 8, 11]],
+  [['LV', 1, 3], ['LIV', 3, 5], ['ZIV', 5, 7], ['RIV', 7, 9], ['RV', 9, 11]],
+  [['TW', 4, 8]]];
+const PITCH = [...PITCH_TOP, ...PITCH_BOT];
 // Einmalige Umstellung: alte grobe Positionen (TW, VZ, VA, MZ, MA, AZ, AA) + alter Positionsplan → 15 Positionen
 function migratePositions() {
   const lu = (Store.data('lineup:main') || {}).slots || {};
@@ -119,6 +125,7 @@ const LVL3 = ['niedrig', 'mittel', 'hoch'];
 const FITL = { 3: 'Ideal', 2: 'Gut', 1: 'Möglich', 0: '–' };
 
 const IC = {
+  heute: '<path d="M3.5 11 12 4l8.5 7"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/>',
   saison: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M7.5 14h3M13.5 14h3M7.5 17.5h3"/>',
   spiele: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5l4 2.9-1.5 4.6h-5L8 10.4z"/><path d="M12 7.5V3.2M16 10.4l4.2-1.3M14.5 15l2.6 3.6M9.5 15l-2.6 3.6M8 10.4 3.8 9.1"/>',
   kader: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-3.6 3.2-5.6 6.5-5.6s6 2 6.5 5.6"/><circle cx="17.2" cy="9" r="2.6"/><path d="M16.6 14.6c2.6.2 4.4 2 4.9 4.9"/>',
@@ -143,7 +150,7 @@ const IC = {
   down: '<path d="m6 9 6 6 6-6"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
 };
-const crestBtn = () => `<button class="crest" data-a="open" data-h="#/mehr/einstellungen" aria-label="Einstellungen"><img src="icons/wappen.png" alt="FC Hennef 05"></button>`;
+const crestBtn = on => `<button class="crest ${on ? 'on' : ''}" data-a="open" data-h="#/mehr" aria-label="Mehr: Kontakte, Material, Scouting, Einstellungen"><img src="icons/wappen.png" alt="FC Hennef 05"></button>`;
 const icon = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}">${IC[n] || ''}</svg>`;
 
 // ───────────────────────── Datenspeicher ─────────────────────────
@@ -229,15 +236,16 @@ const UI = { ex: { n: null, diff: '', int: '', ph: '', q: '', sort: 'fit' }, ath
   games: { when: 'next', type: '' }, tests: { lvls: new Set(), st: '', q: '' }, contacts: { q: '' }, scout: { prio: '', q: '' }, topics: { ph: '' }, mat: 'need' };
 
 const TABS = [
-  { k: 'saison', l: 'Saison' }, { k: 'spiele', l: 'Spiele' }, { k: 'kader', l: 'Kader' },
-  { k: 'training', l: 'Training' }, { k: 'tests', l: 'Testspiele' }, { k: 'mehr', l: 'Mehr' }];
+  { k: 'heute', l: 'Heute' }, { k: 'saison', l: 'Saison' }, { k: 'spiele', l: 'Spiele' }, { k: 'kader', l: 'Kader' },
+  { k: 'training', l: 'Training' }, { k: 'tests', l: 'Testspiele' }];
 
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
   const parts = h.split('/').filter(Boolean);
-  return { tab: TABS.some(t => t.k === parts[0]) ? parts[0] : 'saison', parts: parts.slice(1) };
+  return { tab: VIEWS[parts[0]] ? parts[0] : 'heute', parts: parts.slice(1) };
 }
 const go = h => { location.hash = h; };
+let LAST = {}; try { LAST = JSON.parse(localStorage.getItem('ca_last') || '{}'); } catch (_) { }
 
 let lastHash = null;
 function render() {
@@ -245,19 +253,22 @@ function render() {
   lastHash = location.hash;
   $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-k="${t.k}" class="${t.k === r.tab ? 'on' : ''}">${icon(t.k)}<span>${t.l}</span></button>`).join('');
   let out;
-  try { out = (VIEWS[r.tab] || VIEWS.saison)(r.parts); }
+  try { out = (VIEWS[r.tab] || VIEWS.heute)(r.parts); }
   catch (e) { console.error(e); out = { title: 'Fehler', html: `<div class="card">Da ist etwas schiefgelaufen: ${esc(e.message)}</div>` }; }
   $('#title').textContent = out.title || 'Coaching';
   $('#back').hidden = !out.back;
-  $('#topActions').innerHTML = out.actions || '';
-  $('#view').innerHTML = out.html + (out.fab ? `<button class="fab" data-a="${out.fab}" aria-label="Neu">${icon('plus')}</button>` : '');
+  $('#topActions').innerHTML = (out.actions || '') + crestBtn(r.tab === 'mehr');
+  const main = !out.back;
+  if (main && TABS.some(t => t.k === r.tab)) { LAST[r.tab] = location.hash || '#/' + r.tab; try { localStorage.setItem('ca_last', JSON.stringify(LAST)); } catch (_) { } }
+  $('#view').innerHTML = out.html + (main ? `<button class="fab" data-a="quick" data-ctx="${out.fab || ''}" aria-label="Schnell hinzufügen">${icon('plus')}</button>`
+    : out.fab ? `<button class="fab" data-a="${out.fab}" aria-label="Neu">${icon('plus')}</button>` : '');
   window.scrollTo(0, sameRoute ? y : 0);
   Sync.show();
 }
 
 function renderResults() {
   const r = route(), tmp = document.createElement('div');
-  tmp.innerHTML = (VIEWS[r.tab] || VIEWS.saison)(r.parts).html;
+  tmp.innerHTML = (VIEWS[r.tab] || VIEWS.heute)(r.parts).html;
   const nr = $('#results', tmp), cr = $('#results');
   if (nr && cr) cr.replaceWith(nr); else render();
 }
@@ -380,6 +391,11 @@ function gameLine(g) {
     <div class="s">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag offen' : D.long(g.date)}${g.kickoff ? ' · ' + esc(g.kickoff) : ''}${g.type ? ' · ' + esc(g.type) : ''}${res}</div></div>
     ${g.ha ? `<span class="ha ${g.ha}">${g.ha}</span>` : ''}${icon('chev', 'chev')}</div>`;
 }
+function trainingLineShort(key) {
+  const w = weekData(key), days = setting().trainingDays || [2, 4, 5];
+  const l = days.map(d => { const ph = GP[((w.days || {})[d] || {}).phase]; return WD[d].slice(0, 2) + ' ' + (ph ? ph.s : '–'); });
+  return l.join(' · ');
+}
 function trainingSummary(key, compact) {
   const w = weekData(key), mon = D.fromKey(key), days = setting().trainingDays || [2, 4, 5];
   return days.map(d => {
@@ -387,54 +403,164 @@ function trainingSummary(key, compact) {
     const tops = (dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
     const nEx = (dd.exercises || []).length + (dd.athletics || []).length;
     return `<div class="row" style="padding:6px 0"><span class="dot" style="background:${ph ? ph.c : '#cbd5e1'}"></span>
-      <div class="grow small"><b>${D.wd(date)} ${D.short(date)}</b> · ${ph ? esc(ph.l) : '<span class="mute">noch nicht geplant</span>'}
+      <div class="grow small"><b>${D.wd(date)} ${D.short(date)}</b> · ${ph ? esc(ph.s + ' · ' + ph.l) : '<span class="mute">noch nicht geplant</span>'}
       ${!compact && tops.length ? `<div class="mute tiny ell">${esc(tops.join(', '))}</div>` : ''}</div>${nEx ? `<span class="badge">${nEx} Üb.</span>` : ''}</div>`;
   }).join('');
 }
 
+// ───────────────────────── Heute (Startseite) ─────────────────────────
+const dayIdx = s => ((D.parse(s).getDay() + 6) % 7) + 1; // Mo=1 … So=7
+function trainingOn(date) {
+  if (!(setting().trainingDays || [2, 4, 5]).includes(dayIdx(date))) return null;
+  const key = D.week(date).key, dd = ((weekData(key).days || {})[dayIdx(date)]) || {};
+  return dd.phase === 'FREI' ? null : { date, key, wd: dayIdx(date), dd };
+}
+function nextTraining(from) { for (let i = 0; i < 21; i++) { const t = trainingOn(D.add(from, i)); if (t) return t; } return null; }
+const nextGame = from => Store.all('game').filter(g => !g.cancelled && g.date >= from).sort(byDate)[0];
+const relDay = d => { const n = D.diff(D.today(), d); return n === 0 ? 'heute' : n === 1 ? 'morgen' : n === 2 ? 'übermorgen' : n > 0 ? `in ${n} Tagen` : `vor ${-n} Tagen`; };
+function phaseLine(cur, t) {
+  const weeks = weeksOf(cur), idx = weeks.findIndex(w => w.key === D.week(t).key);
+  return `${MAKRO[cur.makro]} · ${esc(cur.label)} · Woche ${idx + 1}/${weeks.length}`;
+}
+function nextGameCard(g) {
+  const items = Store.all('checkitem'), done = items.filter(i => (g.checks || {})[i.id]).length, s = setting();
+  const club = findClub(g.opponent), L = club && LEVELS.find(l => l.k === club.level);
+  const n = D.diff(D.today(), g.date);
+  return `<div class="nextcard ng" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">
+    <div class="nc-top"><span class="nc-kind">${icon('spiele', 'mini')} Nächstes Spiel</span><span class="nc-when ${n <= 2 ? 'soon' : ''}">${relDay(g.date)}</span></div>
+    <div class="nc-title">${esc(g.opponent || 'Spiel')}</div>
+    <div class="nc-sub">${D.long(g.date)}${g.kickoff ? ' · ' + esc(g.kickoff) + ' Uhr' : ''}${g.ha ? ` · ${g.ha === 'H' ? 'Heim' : 'Auswärts'}` : ''}${g.type ? ' · ' + esc(g.type) : ''}${g.important ? ' · ⭐ wichtig' : ''}${L && L.k ? ' · ' + esc(L.l) : ''}</div>
+    <div class="nc-stats">
+      <span class="${(g.squad || []).length ? 'ok' : ''}"><b>${(g.squad || []).length}/${s.squadMax || 17}</b>Kader</span>
+      <span class="${(g.start11 || []).length === 11 ? 'ok' : ''}"><b>${(g.start11 || []).length}/11</b>Startelf</span>
+      <span class="${items.length && done === items.length ? 'ok' : ''}"><b>${done}/${items.length}</b>Checkliste</span>
+      <span class="${g.prep && Object.values(g.prep).some(Boolean) ? 'ok' : ''}"><b>${g.prep && Object.values(g.prep).some(Boolean) ? '✓' : '–'}</b>Plan</span></div></div>`;
+}
+function nextTrainingCard(t) {
+  const ph = GP[t.dd.phase] || GP[weekData(t.key).phase], tops = (t.dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
+  const nEx = (t.dd.exercises || []).length, nAth = (t.dd.athletics || []).length, planned = ph || tops.length || nEx || nAth;
+  return `<div class="nextcard train" style="--c:${ph ? ph.c : 'var(--accent)'}" data-a="open" data-h="#/training/woche/${t.key}">
+    <div class="nc-top"><span class="nc-kind">${icon('training', 'mini')} ${t.date === D.today() ? 'Training heute' : 'Nächstes Training'}</span><span class="nc-when">${t.date === D.today() ? WD[t.wd] : relDay(t.date)}</span></div>
+    <div class="nc-title">${ph ? `<span class="phcode">${esc(ph.s)}</span> ${esc(ph.l)}` : WD[t.wd] + ' ' + D.short(t.date)}</div>
+    ${planned ? `<div class="nc-sub">${tops.length ? esc(tops.slice(0, 3).join(' · ')) + (tops.length > 3 ? ` +${tops.length - 3}` : '') : 'Noch keine Schwerpunkte'}</div>
+      <div class="nc-stats"><span class="${nEx ? 'ok' : ''}"><b>${nEx}</b>Übungen</span><span class="${nAth ? 'ok' : ''}"><b>${nAth}</b>Athletik</span><span class="${t.dd.note ? 'ok' : ''}"><b>${t.dd.note ? '✓' : '–'}</b>Notiz</span></div>`
+      : `<div class="nc-sub">Noch nicht geplant – antippen zum Planen</div>`}</div>`;
+}
+function weekStrip(t) {
+  const wk = D.week(t), mon = wk.monday, games = weekGames(wk.key);
+  let h = `<div class="wstrip">`;
+  for (let i = 0; i < 7; i++) {
+    const d = D.add(mon, i), tr = trainingOn(d), g = games.find(x => x.date === d && !x.cancelled), ph = tr && GP[tr.dd.phase];
+    const href = g ? '#/spiele/' + encodeURIComponent(g.id) : tr ? '#/training/woche/' + wk.key : '#/saison/woche/' + wk.key;
+    h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}">
+      <span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span>
+      <span class="wm">${g ? `<i class="mg ${outcome(g) ? 'o' + outcome(g) : ''}" title="${esc(g.opponent)}">${icon('spiele')}</i>` : ''}${tr ? `<i class="mt" style="--c:${ph ? ph.c : 'var(--mute)'}">${ph ? esc(ph.s) : 'T'}</i>` : ''}</span></button>`;
+  }
+  return h + `</div>`;
+}
+const todoRow = (ic, title, sub, attrs, right = '') => `<div class="todo" ${attrs}><span class="ti">${icon(ic)}</span><div class="grow"><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>${right || icon('chev', 'chev')}</div>`;
+function viewHeute() {
+  if (!phases().length && !Store.all('game').length) return { title: 'Heute', html: emptyState() };
+  const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
+  const dl = D.parse(t).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+  let h = `<div class="hello" data-a="open" data-h="#/saison"><div class="hd">${esc(dl)}</div>
+    <div class="hs">KW ${wk.week}${cur ? ' · ' + phaseLine(cur, t) : nxt ? ' · Pause bis ' + D.short(nxt.start) : ''}</div>
+    ${cur ? `<div class="thinbar"><i style="width:${Math.min(100, Math.round((D.diff(cur.start, t) + 1) / (D.diff(cur.start, cur.end) + 1) * 100))}%;background:${PHC[cur.type]}"></i></div>` : ''}</div>`;
+
+  const g = nextGame(t), tr = nextTraining(t);
+  const cards = [];
+  if (tr) cards.push([tr.date, nextTrainingCard(tr)]);
+  if (g) cards.push([g.date, nextGameCard(g)]);
+  cards.sort((a, b) => a[0].localeCompare(b[0]));
+  h += cards.map(c => c[1]).join('');
+  const wph = GP[weekData(wk.key).phase];
+  h += sec(`Diese Woche · KW ${wk.week}`, `${wph ? `<span class="phcode sm" style="--c:${wph.c}" title="Schwerpunkt der Woche: ${esc(wph.l)}">${esc(wph.s)}</span>` : ''}<button class="link" data-a="open" data-h="#/training/woche/${wk.key}">Woche planen</button>`) + weekStrip(t);
+
+  // Zu erledigen – alles an einem Ort
+  let todo = '', n = 0;
+  const nr = Store.all('game').filter(needsResult).sort(byDate);
+  for (const x of nr.slice(0, 3)) { n++; todo += todoRow('spiele', `Ergebnis: ${esc(shortOpp(x.opponent))}`, D.long(x.date), `data-a="quickResult" data-id="${esc(x.id)}"`, '<span class="link">Eintragen</span>'); }
+  if (nr.length > 3) { n += nr.length - 3; todo += todoRow('spiele', `${nr.length - 3} weitere Ergebnisse fehlen`, 'im Spiele-Tab', `data-a="open" data-h="#/spiele"`); }
+  if (g && D.diff(t, g.date) <= 7) {
+    const items = Store.all('checkitem'), open = items.filter(i => !(g.checks || {})[i.id]).length;
+    if (open) { n++; todo += todoRow('spiele', `Spieltag ${esc(shortOpp(g.opponent))}: ${open} Punkte offen`, `Checkliste · ${relDay(g.date)}`, `data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}"`); }
+    if (!(g.squad || []).length) { n++; todo += todoRow('kader', `Kader für ${esc(shortOpp(g.opponent))} wählen`, relDay(g.date), `data-a="pickSquad" data-id="${esc(g.id)}"`); }
+  }
+  const cb = Store.all('club').filter(c => c.callback && !c.done).length;
+  if (cb) { n++; todo += todoRow('tests', `Testspiele: ${cap(cb, 'Verein', 'Vereine')} zurückmelden`, 'Testspielplanung', `data-a="testsStatus" data-v="callback"`); }
+  const noNum = players().filter(p => !p.number);
+  if (noNum.length) { n++; todo += todoRow('kader', `${cap(noNum.length, 'Spieler', 'Spieler')} ohne Rückennummer`, esc(noNum.map(p => p.short || p.name).join(', ')), `data-a="open" data-h="#/kader/liste"`); }
+  if (cur) {
+    const wt = tasksOf(cur.id, 'mikro'), wdn = weekData(wk.key).tasks || {}, openW = wt.filter(x => !wdn[x.id]);
+    if (openW.length) todo += `<div class="todo-sub">Jede Woche</div><div class="list checks">${openW.map(x => check(false, x.title, `data-a="wtask" data-id="${esc(x.id)}" data-week="${wk.key}"`)).join('')}</div>`;
+    const om = tasksOf(cur.id, 'meso').filter(x => !x.done);
+    if (om.length) todo += `<div class="todo-sub"><span class="grow">${esc(cur.label)} · noch ${om.length} offen</span><button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">Alle</button></div><div class="list checks">${om.slice(0, 3).map(x => taskRow(x)).join('')}</div>`;
+    n += openW.length + om.length;
+  }
+  if (nxt && D.diff(t, nxt.start) <= 14) {
+    const on = tasksOf(nxt.id, 'meso').filter(x => !x.done).length;
+    if (on) { n++; todo += todoRow('saison', `Bald: ${esc(phaseName(nxt))}`, `startet ${relDay(nxt.start)} · ${cap(on, 'Aufgabe', 'Aufgaben')} vorbereiten`, `data-a="open" data-h="#/saison/phase/${nxt.id}"`); }
+  }
+  h += sec('Zu erledigen', n ? `<span class="nbadge static">${n}</span>` : '');
+  h += `<div class="card todos">${todo || '<div class="mute small" style="padding:6px 2px">Alles erledigt 🎉</div>'}</div>`;
+
+  // Form kompakt
+  const played = Store.all('game').filter(x => !x.cancelled && x.date < t && outcome(x)).sort(byDate);
+  if (played.length) {
+    const tot = { S: 0, U: 0, N: 0 }; played.forEach(x => tot[outcome(x)]++);
+    const last5 = played.slice(-5), pts = { S: 3, U: 1, N: 0 }, avg = last5.reduce((s, x) => s + pts[outcome(x)], 0) / last5.length;
+    h += sec('Form') + `<div class="card tap formmini" data-a="open" data-h="#/spiele"><div class="grow"><div class="fm-big">${avg.toFixed(1).replace('.', ',')} <span>Punkte/Spiel (letzte 5)</span></div>
+      <div class="small mute">${tot.S} S · ${tot.U} U · ${tot.N} N</div></div><div>${last5.map(x => `<span class="fdot" style="background:${OUT[outcome(x)].c}">${outcome(x)}</span>`).join('')}</div>${icon('chev', 'chev')}</div>`;
+  }
+  return { title: 'Heute', html: h };
+}
+
+// ───────────────────────── Saison (Makro → Meso → Mikro) ─────────────────────────
+function seasonTimeline(t) {
+  const ps = phases(); if (!ps.length) return '';
+  const a = ps[0].start, b = ps[ps.length - 1].end, total = D.diff(a, b) + 1, pos = d => (D.diff(a, d) / total * 100);
+  const now = t >= a && t <= b ? pos(t) : null;
+  let segs = '', labels = '';
+  for (const p of ps) segs += `<i class="seg-${p.type}" style="left:${pos(p.start)}%;width:${(D.diff(p.start, p.end) + 1) / total * 100}%;background:${PHC[p.type]}" data-a="open" data-h="#/saison/phase/${p.id}" title="${esc(phaseName(p))}"></i>`;
+  for (const mk of ['HR', 'RR']) { const m = ps.filter(p => p.makro === mk); if (m.length) labels += `<span style="left:${pos(m[0].start)}%">${MAKRO[mk]}</span>`; }
+  return `<div class="card tline"><div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b>` : ''}</div><div class="tl-lab">${labels}</div>
+    <div class="legend">${[['vorb', 'Vorbereitung'], ['wettk', 'Wettkampf'], ['nachb', 'Nachbereitung']].map(([k, l]) => `<span><span class="dot" style="background:${PHC[k]};width:8px;height:8px"></span> ${l}</span>`).join('')}<span><b class="tl-key"></b> heute</span></div></div>`;
+}
 function viewSaison(parts) {
   if (parts[0] === 'phase') return viewPhase(parts[1]);
   if (parts[0] === 'woche') return viewWeek(parts[1]);
-  const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
-  let h = '';
   if (!phases().length) return { title: 'Saison', html: emptyState() };
+  const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
+  let h = seasonTimeline(t);
   if (cur) {
     const weeks = weeksOf(cur), idx = weeks.findIndex(w => w.key === wk.key);
-    const pct = Math.min(100, Math.round((D.diff(cur.start, t) + 1) / (D.diff(cur.start, cur.end) + 1) * 100));
-    h += `<section class="hero" style="--pc:${PHC[cur.type]}" data-a="open" data-h="#/saison/phase/${cur.id}">
-      <div class="eyebrow">${MAKRO[cur.makro]} · Mesozyklus</div><div class="hero-title">${esc(cur.label)}</div>
-      <div class="hero-sub">Woche ${idx + 1} von ${weeks.length} · KW ${wk.week} · ${D.short(cur.start)}–${D.short(cur.end)}</div>
-      <div class="bar"><i style="width:${pct}%"></i></div>
-      ${nxt ? `<div class="hero-next">Danach: <b>${esc(phaseName(nxt))}</b> ab ${D.long(nxt.start)} · in ${cap(D.diff(t, nxt.start), 'Tag', 'Tagen')}</div>` : ''}</section>`;
-    if (D.diff(cur.start, t) < 7) h += phaseAlert(cur, `Jetzt startet: ${phaseName(cur)}`, 'Das steht jetzt an:');
+    const meso = tasksOf(cur.id, 'meso'), done = meso.filter(x => x.done).length;
+    h += `<div class="phasecard" style="--pc:${PHC[cur.type]}" data-a="open" data-h="#/saison/phase/${cur.id}">
+      <div class="pc-eye">Jetzt · ${MAKRO[cur.makro]}</div><div class="pc-title">${esc(cur.label)}</div>
+      <div class="pc-sub">Woche ${idx + 1} von ${weeks.length} · ${D.short(cur.start)}–${D.short(cur.end)}</div>
+      <div class="pc-weeks">${weeks.map((w, i) => `<i class="${i < idx ? 'done' : i === idx ? 'now' : ''}"></i>`).join('')}</div>
+      <div class="pc-foot"><span>${done}/${meso.length} Aufgaben erledigt</span>${nxt ? `<span>danach ${esc(nxt.label)} ${relDay(nxt.start)}</span>` : ''}</div></div>`;
+    const open = meso.filter(x => !x.done);
+    h += sec(`Aufgaben · ${cur.label}`, `<button class="link" data-a="addPtask" data-phase="${cur.id}" data-mode="meso">+ Aufgabe</button>`);
+    h += `<div class="card">${open.length ? `<div class="list checks">${open.slice(0, 8).map(x => taskRow(x)).join('')}</div>${open.length > 8 ? `<button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">+ ${open.length - 8} weitere ansehen</button>` : ''}` : '<div class="mute small">Alles erledigt 🎉</div>'}</div>`;
+    h += sec(`Jede Woche · KW ${wk.week}`, `<button class="link" data-a="open" data-h="#/saison/woche/${wk.key}">Woche öffnen</button>`);
+    h += `<div class="card">${weekTaskRows(cur, wk.key)}</div>`;
   } else if (nxt) {
-    h += `<section class="hero" style="--pc:#475569"><div class="eyebrow">Pause</div><div class="hero-title">Saisonpause</div>
-      <div class="hero-sub">${esc(phaseName(nxt))} startet ${D.long(nxt.start)} · in ${cap(D.diff(t, nxt.start), 'Tag', 'Tagen')}</div></section>`;
+    h += `<div class="phasecard" style="--pc:#64748b"><div class="pc-eye">Pause</div><div class="pc-title">Saisonpause</div><div class="pc-sub">${esc(phaseName(nxt))} startet ${D.long(nxt.start)} · ${relDay(nxt.start)}</div></div>`;
   }
-  if (nxt && D.diff(t, nxt.start) <= 14) h += phaseAlert(nxt, `Bald: ${phaseName(nxt)}`, `Startet ${D.long(nxt.start)} – schon vorbereiten:`);
-
-  const resTodo = Store.all('game').filter(needsResult).sort(byDate);
-  if (resTodo.length) h += `<div class="card alert"><h3><span class="grow">Ergebnis eintragen</span><span class="nbadge static">${resTodo.length}</span></h3><div class="list">${resTodo.slice(0, 5).map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
-  if (cur) {
-    const games = weekGames(wk.key);
-    h += sec(`Diese Woche · KW ${wk.week}`, `<button class="link" data-a="open" data-h="#/saison/woche/${wk.key}">Woche öffnen</button>`);
-    h += `<div class="card"><h3>Jede Woche erledigen</h3>${weekTaskRows(cur, wk.key)}</div>`;
-    h += `<div class="card tap" data-a="open" data-h="#/training/woche/${wk.key}"><h3><span class="grow">Training</span>${icon('chev', 'chev')}</h3>${trainingSummary(wk.key)}</div>`;
-    if (games.length) h += `<div class="card"><h3>Spiele</h3><div class="list">${games.map(gameLine).join('')}</div></div>`;
-    const open = tasksOf(cur.id, 'meso').filter(x => !x.done);
-    h += sec(`Offen in der ${cur.label}`, `<button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">Alle</button>`);
-    h += `<div class="card">${open.length ? `<div class="list checks">${open.slice(0, 8).map(x => taskRow(x)).join('')}</div>${open.length > 8 ? `<div class="mute small" style="margin-top:6px">+ ${open.length - 8} weitere</div>` : ''}` : '<div class="mute small">Alles erledigt 🎉</div>'}</div>`;
+  if (nxt && D.diff(t, nxt.start) <= 21) {
+    const on = tasksOf(nxt.id, 'meso').filter(x => !x.done);
+    if (on.length) h += sec(`Bald: ${nxt.label} · ${relDay(nxt.start)}`, `<button class="link" data-a="open" data-h="#/saison/phase/${nxt.id}">Alle</button>`)
+      + `<div class="card soon"><div class="list checks">${on.slice(0, 6).map(x => taskRow(x)).join('')}</div>${on.length > 6 ? `<div class="tiny mute" style="margin-top:6px">+ ${on.length - 6} weitere</div>` : ''}</div>`;
   }
-  const ng = Store.all('game').filter(g => g.date >= t).sort(byDate)[0];
-  if (ng && !(cur && weekGames(wk.key).some(g => g.id === ng.id))) h += sec('Nächstes Spiel') + `<div class="card"><div class="list">${gameLine(ng)}</div></div>`;
-
   for (const mk of ['HR', 'RR']) {
     const ps = phases().filter(p => p.makro === mk); if (!ps.length) continue;
-    h += sec(`Makrozyklus · ${MAKRO[mk]}`, `<span class="tiny">${D.full(ps[0].start)} – ${D.full(ps[ps.length - 1].end)}</span>`);
-    h += ps.map(p => mesoCard(p, cur && cur.id === p.id)).join('');
+    h += sec(`${MAKRO[mk]}`, `<span class="tiny">${D.short(ps[0].start)} – ${D.full(ps[ps.length - 1].end)}</span>`);
+    h += `<div class="card list mesolist">${ps.map(p => mesoCard(p, cur && cur.id === p.id)).join('')}</div>`;
   }
-  return { title: 'Saison', html: h, actions: crestBtn() };
+  return { title: 'Saison', html: h };
 }
+
 function phaseAlert(p, title, intro) {
   const open = tasksOf(p.id, 'meso').filter(x => !x.done);
   if (!open.length) return '';
@@ -445,7 +571,7 @@ function phaseAlert(p, title, intro) {
 function mesoCard(p, now) {
   const tasks = tasksOf(p.id, 'meso'), done = tasks.filter(t => t.done).length, weeks = weeksOf(p);
   const nGames = gamesBetween(p.start, p.end).length;
-  return `<div class="card tap meso ${now ? 'now' : ''}" data-a="open" data-h="#/saison/phase/${p.id}">
+  return `<div class="meso tap ${now ? 'now' : ''}" data-a="open" data-h="#/saison/phase/${p.id}">
     <span class="stripe" style="background:${PHC[p.type]}"></span><div class="grow" style="flex:1;min-width:0">
     <div class="row"><b class="grow">${esc(p.label)}</b>${now ? badge('jetzt', 'var(--accent)') : ''}</div>
     <div class="small mute">${D.short(p.start)} – ${D.short(p.end)} · ${cap(weeks.length, 'Woche', 'Wochen')} · ${cap(nGames, 'Spiel', 'Spiele')}</div>
@@ -456,8 +582,8 @@ function viewPhase(pid) {
   const p = Store.get(pid); if (!p) return notFound();
   const t = D.today(), curKey = D.week(t).key;
   const meso = tasksOf(p.id, 'meso'), mikro = tasksOf(p.id, 'mikro');
-  let h = `<section class="hero" style="--pc:${PHC[p.type]}"><div class="eyebrow">${MAKRO[p.makro]} · Mesozyklus</div>
-    <div class="hero-title">${esc(p.label)}</div><div class="hero-sub">${D.long(p.start)} – ${D.long(p.end)} · KW ${D.week(p.start).week}–${D.week(p.end).week}</div></section>`;
+  let h = `<div class="phasecard" style="--pc:${PHC[p.type]}"><div class="pc-eye">${MAKRO[p.makro]} · Mesozyklus</div>
+    <div class="pc-title">${esc(p.label)}</div><div class="pc-sub">${D.long(p.start)} – ${D.long(p.end)} · KW ${D.week(p.start).week}–${D.week(p.end).week}</div></div>`;
   h += sec(`Aufgaben dieser Phase (${meso.filter(x => x.done).length}/${meso.length})`, `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button>`);
   h += `<div class="card">${meso.length ? `<div class="list checks">${meso.map(x => taskRow(x, { edit: true })).join('')}</div>` : '<div class="mute small">Noch keine Aufgaben.</div>'}</div>`;
   h += sec('Jede Woche (Mikrozyklus)', `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button>`);
@@ -545,6 +671,8 @@ function viewSpiele(parts) {
   let h = `<div class="seg">${[['next', 'Kommend'], ['past', 'Gespielt'], ['all', 'Alle']].map(([v, l]) => `<button class="${f.when === v ? 'on' : ''}" data-a="gWhen" data-v="${v}">${l}</button>`).join('')}</div>`;
   h += chips([['', 'Alle Typen'], ...GTYPES.map(x => [x, x])], f.type, 'gType');
   h += formCurve(all.filter(g => g.date < t));
+  { const cl = Store.all('club'), cb = cl.filter(c => c.callback && !c.done).length, dn = cl.filter(c => c.done).length;
+    h += `<div class="linkrow" data-a="open" data-h="#/tests">${icon('tests', 'mini')}<span class="grow">Testspielplanung${cb ? ` · <b>${cb} zurückmelden</b>` : ''} · ${dn} vereinbart</span>${icon('chev', 'chev')}</div>`; }
   if (todo.length) h += `<div class="card alert"><h3><span class="grow">Ergebnis eintragen</span><span class="nbadge static">${todo.length}</span></h3>
     <div class="list">${todo.map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)} · ${esc(g.type || 'Spiel')}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
   if (!games.length) h += '<div class="empty">Keine Spiele für diese Auswahl.</div>';
@@ -556,7 +684,7 @@ function viewSpiele(parts) {
   }
   if (month) h += '</div>';
   h += `<div class="legend" style="margin:12px 4px">${Object.values(OUT).map(o => `<span><span class="dot" style="background:${o.c};width:9px;height:9px"></span> ${o.l}</span>`).join('')}<span><span class="nbadge static">1</span> offen</span></div>`;
-  return { title: 'Spiele', html: h, fab: 'newGame', actions: crestBtn() };
+  return { title: 'Spiele', html: h, fab: 'newGame' };
 }
 function prepStatus(g) {
   const items = Store.all('checkitem'), done = items.filter(i => (g.checks || {})[i.id]).length;
@@ -615,6 +743,12 @@ function viewGame(id) {
     h += `<div class="card">${club ? `<div class="li" data-a="openClub" data-id="${esc(club.id)}"><div class="grow"><div class="t">${esc(club.name)}</div><div class="s">${esc([club.stadt, club.verband].filter(Boolean).join(' · '))}</div></div>${icon('chev', 'chev')}</div>` : ''}
       ${contacts.map(contactRow).join('')}</div>`;
   }
+  const wkKey = D.week(g.date).key, before = Store.all('game').filter(x => x.id !== g.id && !x.cancelled && x.date < g.date && sameClub(x.opponent, g.opponent)).sort(byDate).reverse();
+  h += sec('Verknüpft') + `<div class="card list">
+    <div class="li" data-a="open" data-h="#/training/woche/${wkKey}"><span class="ti">${icon('training')}</span><div class="grow"><div class="t">Training in dieser Woche</div><div class="s">KW ${D.week(g.date).week} · ${esc(trainingLineShort(wkKey))}</div></div>${icon('chev', 'chev')}</div>
+    <div class="li" data-a="open" data-h="#/saison/woche/${wkKey}"><span class="ti">${icon('saison')}</span><div class="grow"><div class="t">Saisonwoche</div><div class="s">${esc((phaseAt(g.date) && phaseName(phaseAt(g.date))) || 'keine Phase')}</div></div>${icon('chev', 'chev')}</div>
+    ${club ? '' : `<div class="li" data-a="clubFromGame" data-id="${esc(id)}"><span class="ti">${icon('tests')}</span><div class="grow"><div class="t">In Testspielplanung aufnehmen</div><div class="s">Gegner als Verein anlegen</div></div>${icon('plus', 'chev')}</div>`}
+    ${before.map(x => gameLine(x)).join('')}</div>`;
   h += sec('Nachbereitung');
   h += `<div class="card"><div class="f" style="margin:0"><textarea data-a="gameField" data-id="${esc(id)}" data-f="review" placeholder="Was lief gut? Was nehmen wir mit ins Training?">${esc(g.review || '')}</textarea></div></div>`;
   return { title: g.opponent || 'Spiel', back: true, html: h };
@@ -673,7 +807,7 @@ function viewKader(parts) {
   else if (sub === 'positionen') h += posMatrix();
   else if (sub === 'liste') h += kaderListe();
   else h += pitchView();
-  return { title: 'Kader & Mannschaft', html: h, fab: sub === 'liste' || sub === 'tiers' ? 'newPlayer' : null, actions: crestBtn() };
+  return { title: 'Kader & Mannschaft', html: h, fab: sub === 'liste' || sub === 'tiers' ? 'newPlayer' : null };
 }
 const tierLegend = () => `<div class="legend" style="margin:8px 4px 2px">${TIERS.slice(0, 4).map(t => `<span><span class="dot" style="background:${t.c};width:9px;height:9px"></span> ${esc(t.l)}</span>`).join('')}
   <span><span class="pos l1">Stamm</span></span><span><span class="pos l2">in Frage</span> = eine Stufe tiefer</span></div>`;
@@ -686,15 +820,15 @@ function pchip(p, e) {
   return `<span class="pchip ${e.lv === 2 ? 'frage' : ''}" style="--tc:${t.c};--tb:${t.bg}" title="${esc(POSVLV[e.lv])} · ${esc(t.l)}${p.number ? ' · #' + esc(p.number) : ''}">${esc(p.short || p.name)}</span>`;
 }
 function pitchView() {
-  let h = `<div class="pitch2">`;
-  for (const row of PITCH) {
-    for (const [k, a, b] of row) {
-      const P = posvOf(k), list = eligible(k);
-      h += `<div class="pbox" style="grid-column:${a}/${b}" data-a="posSheet" data-k="${k}">
-        <div class="pl2"><b>${esc(P.l)}</b> <span>${esc(P.f.replace(/ \(.*\)$/, ''))}</span><em>${list.length || ''}</em></div>
-        <div class="pchips">${list.map(x => pchip(x.p, x.e)).join('') || '<span class="tiny mute">niemand</span>'}</div></div>`;
-    }
-  }
+  let h = `<div class="pitch3"><div class="pm pm-touch"></div><div class="pm pm-box top"></div><div class="pm pm-six top"></div>
+    <div class="pm pm-box bot"></div><div class="pm pm-six bot"></div>`;
+  const half = (rows, cls) => `<div class="phalf ${cls}">${rows.map(row => row.map(([k, a, b]) => {
+    const P = posvOf(k), list = eligible(k), wide = b - a >= 3;
+    return `<div class="pbox" style="grid-column:${a}/${b}" data-a="posSheet" data-k="${k}" title="${esc(P.f)}">
+      <div class="pl2"><b>${esc(P.l)}</b><em>${list.length || ''}</em></div>${wide ? `<div class="pfull">${esc(P.f.replace(/ \(.*\)$/, ''))}</div>` : ''}
+      <div class="pchips">${list.map(x => pchip(x.p, x.e)).join('') || '<span class="pnone">–</span>'}</div></div>`;
+  }).join('')).join('')}</div>`;
+  h += half(PITCH_TOP, 'top') + `<div class="halfway"><i class="hl"></i><i class="cc"></i><i class="cs"></i></div>` + half(PITCH_BOT, 'bot');
   h += `</div>${tierLegend()}<div class="tiny mute" style="margin:6px 4px">Zu sehen ist jeder, der auf der Position mindestens „Okay“ ist. Position antippen, um Stamm / in Frage zu ändern.</div>`;
   const none = players().filter(p => !Object.keys(p.posv || {}).length);
   if (none.length) h += sec('Ohne Positionen') + `<div class="card">${none.map(p => `<span class="pill" data-a="editPlayer" data-id="${esc(p.id)}">${esc(p.name)}</span>`).join('')}</div>`;
@@ -844,7 +978,7 @@ function viewTraining(parts) {
   else if (sub === 'athletik') { h += athleticList(); fab = 'newAthletic'; }
   else if (sub === 'themen') { h += topicList(); fab = 'newTopic'; }
   else h += trainingWeek(parts[1] || D.week(D.today()).key);
-  return { title: 'Training', html: h, fab, actions: crestBtn() };
+  return { title: 'Training', html: h, fab };
 }
 function mesoDistribution(p) {
   const cnt = {}; let total = 0;
@@ -852,22 +986,28 @@ function mesoDistribution(p) {
   if (!total) return `<div class="tiny mute">In dieser Phase ist noch kein Trainingstag einer Spielphase zugeordnet.</div>`;
   const keys = Object.keys(GP).filter(k => cnt[k]);
   return `<div class="distbar">${keys.map(k => `<i style="width:${cnt[k] / total * 100}%;background:${GP[k].c}"></i>`).join('')}</div>
-    <div class="legend">${keys.map(k => `<span><span class="dot" style="background:${GP[k].c};width:8px;height:8px"></span> ${k === 'ATH' ? 'Athletik' : k} ${cnt[k]}×</span>`).join('')}</div>`;
+    <div class="legend">${keys.map(k => `<span><span class="dot" style="background:${GP[k].c};width:8px;height:8px"></span> ${gpS(k)} ${cnt[k]}×</span>`).join('')}</div>`;
 }
 function trainingWeek(key) {
   const mon = D.fromKey(key), p = phaseAt(mon) || phaseAt(D.add(mon, 6)), w = weekData(key), days = setting().trainingDays || [2, 4, 5];
-  let h = weekNav(key, '#/training/woche/');
-  h += `<div class="card"><h3>Fokus der Woche</h3><div class="f" style="margin:0"><input type="text" data-a="weekField" data-week="${key}" data-f="focus" value="${esc(w.focus || '')}" placeholder="z. B. Schnelligkeit & Explosivität, Umschalten…"></div>
-    ${p ? `<div class="sub" style="margin-top:12px">Spielphasen in der ${esc(p.label)} bisher</div>${mesoDistribution(p)}` : ''}</div>`;
+  const prev = D.week(D.add(mon, -7)).key, next = D.week(D.add(mon, 7)).key, wp = GP[w.phase];
+  let h = `<div class="weekhead"><div class="wh-nav"><button class="iconbtn" data-a="open" data-h="#/training/woche/${prev}" aria-label="Vorherige Woche">${icon('left')}</button>
+    <div class="grow"><div class="wh-kw">KW ${D.week(mon).week}${key === D.week(D.today()).key ? ' <span class="todaytag">jetzt</span>' : ''}</div><div class="wh-sub">${D.short(mon)}–${D.short(D.add(mon, 6))} · ${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div></div>
+    <button class="iconbtn" data-a="open" data-h="#/training/woche/${next}" aria-label="Nächste Woche">${icon('right')}</button></div>
+    <button class="phpick wk ${wp ? 'set' : ''}" style="--c:${wp ? wp.c : 'var(--mute)'}" data-a="phasePick" data-week="${key}">
+      ${wp ? `<span class="phcode">${esc(wp.s)}</span><span class="grow"><small>Schwerpunkt der Woche</small>${esc(wp.l)}</span>` : '<span class="grow">Schwerpunkt der Woche wählen</span>'}${icon('down', 'chev')}</button>
+    ${p ? `<div class="wh-dist"><div class="tiny mute">Trainingstage in der ${esc(p.label)} bisher</div>${mesoDistribution(p)}</div>` : ''}</div>`;
   for (const d of days) {
     const date = D.add(mon, d - 1), dd = (w.days || {})[d] || {}, ph = GP[dd.phase];
     const tops = (dd.topics || []).map(id => Store.get(id)).filter(Boolean);
     const exs = (dd.exercises || []).map(id => Store.get(id)).filter(Boolean);
     const aths = (dd.athletics || []).map(id => Store.get(id)).filter(Boolean);
     const games = gamesBetween(date, date);
-    h += `<div class="card day" style="--dc:${ph ? ph.c : '#cbd5e1'}"><h3><span class="grow">${WD[d]} ${D.short(date)}</span>${games.map(g => badge('Spiel: ' + g.opponent)).join('')}</h3>
-      <div class="phchips">${Object.entries(GP).map(([k, v]) => `<button class="phchip ${dd.phase === k ? 'on' : ''}" style="--c:${v.c}" data-a="dayPhase" data-week="${key}" data-day="${d}" data-ph="${k}" title="${esc(v.l)}">${k === 'ATH' ? 'Athletik' : k === 'FREI' ? 'frei' : k}</button>`).join('')}</div>
-      ${ph ? `<div class="small" style="margin:-4px 0 6px;color:${ph.c};font-weight:700">${esc(ph.l)}</div>` : ''}
+    const isToday = date === D.today();
+    h += `<div class="card day ${isToday ? 'today' : ''}" style="--dc:${ph ? ph.c : 'var(--line)'}"><h3><span class="grow">${WD[d]} ${D.short(date)}${isToday ? ' <span class="todaytag">heute</span>' : ''}</span></h3>
+      ${games.map(g => `<div class="gamelink" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">${icon('spiele', 'mini')} Spiel: <b>${esc(g.opponent)}</b>${g.kickoff ? ' · ' + esc(g.kickoff) : ''}${icon('chev', 'chev')}</div>`).join('')}
+      <button class="phpick ${ph ? 'set' : ''}" style="--c:${ph ? ph.c : 'var(--mute)'}" data-a="phasePick" data-week="${key}" data-day="${d}">
+        ${ph ? `<span class="phcode">${esc(ph.s)}</span><span class="grow">${esc(ph.l)}</span>` : `<span class="grow">Spielphase wählen</span>`}${icon('down', 'chev')}</button>
       ${dd.phase === 'FREI' ? '' : `
       <div class="sub"><span class="grow">Schwerpunkte</span><button class="link" data-a="pickDay" data-what="topics" data-week="${key}" data-day="${d}">+ wählen</button></div>
       <div>${tops.map(t => `<span class="topicchip">${esc(t.title)}</span>`).join('') || '<span class="tiny mute">Aus dem Periodisierungsplan wählen</span>'}</div>
@@ -877,7 +1017,7 @@ function trainingWeek(key) {
       ${aths.map(a => `<div class="li" data-a="athOpen" data-id="${esc(a.id)}" style="padding:7px 0"><div class="grow small"><b>${esc(a.name)}</b> <span class="mute">${esc([a.dist, a.reps].filter(Boolean).join(' · '))}</span></div>${icon('chev', 'chev')}</div>`).join('') || '<div class="tiny mute">Aus dem Athletikportfolio wählen</div>'}`}
       <div class="f" style="margin:10px 0 0"><textarea data-a="dayNote" data-week="${key}" data-day="${d}" placeholder="Notiz zum Training…" style="min-height:52px">${esc(dd.note || '')}</textarea></div></div>`;
   }
-  h += `<div class="tiny mute" style="margin:4px">Trainingstage änderst du unter Mehr → Einstellungen.</div>`;
+  h += `<div class="tiny mute" style="margin:4px">Trainingstage änderst du über das Wappen oben rechts → Einstellungen.</div>`;
   return h;
 }
 const exName = e => e.name + (e.variant ? ' ' + e.variant : '');
@@ -899,9 +1039,9 @@ function exerciseList() {
     <select data-a="exSel" data-f="sort"><option value="fit" ${f.sort === 'fit' ? 'selected' : ''}>Passend zuerst</option><option value="name" ${f.sort === 'name' ? 'selected' : ''}>Name</option><option value="diff" ${f.sort === 'diff' ? 'selected' : ''}>Schwierigkeit ↑</option><option value="int" ${f.sort === 'int' ? 'selected' : ''}>Intensität ↓</option><option value="rating" ${f.sort === 'rating' ? 'selected' : ''}>Bewertung</option></select></div>
     <div class="filters"><select data-a="exSel" data-f="diff"><option value="">Schwierigkeit: alle</option>${LVL3.map(x => `<option ${f.diff === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
     <select data-a="exSel" data-f="int"><option value="">Intensität: alle</option>${LVL3.map(x => `<option ${f.int === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
-    <select data-a="exSel" data-f="ph"><option value="">Spielphase: alle</option>${GP5.map(k => `<option value="${k}" ${f.ph === k ? 'selected' : ''}>${GP[k].l}</option>`).join('')}</select></div>`;
+    <select data-a="exSel" data-f="ph"><option value="">Spielphase: alle</option>${GP5.map(k => `<option value="${k}" ${f.ph === k ? 'selected' : ''}>${GP[k].s} · ${GP[k].l}</option>`).join('')}</select></div>`;
   h += `<div class="card list">${ex.map(e => { const s = fit(e); return `<div class="li" data-a="exOpen" data-id="${esc(e.id)}"><div class="grow"><div class="t">${esc(exName(e))}</div>
-    <div class="badges">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(k, GP[k]?.c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
+    <div class="badges">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(gpS(k), GP[k]?.c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
     <div class="tiny mute" style="margin-top:4px">${esc(fitRange(e) || 'Spielerzahl nicht hinterlegt')}</div></div><span class="fitb fit${s}">${FITL[s]}</span></div>`; }).join('') || '<div class="empty">Keine Übungen gefunden.</div>'}</div></div>`;
   return h;
 }
@@ -910,7 +1050,7 @@ function exerciseDetail(id) {
   const rows = [['Erklärung', e.expl], ['Aufbau', e.setup], ['Material', e.material], ['Vorteile', e.pros], ['Nachteile', e.cons], ['Variationen', e.variations], ['Vorteile der Variation', e.varPros], ['Nachteile der Variation', e.varCons]].filter(x => x[1]);
   let fitg = ''; for (let n = 1; n <= 21; n++) { const s = (e.fit || {})[n] || 0; fitg += `<span class="fitb fit${s}" style="text-align:center">${n}</span>`; }
   const plannedIn = Store.all('week').filter(w => Object.values(w.days || {}).some(d => (d.exercises || []).includes(id))).length;
-  Sheet.open(exName(e), `<div class="badges" style="margin-top:0">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(GP[k].l, GP[k].c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
+  Sheet.open(exName(e), `<div class="badges" style="margin-top:0">${e.diff ? badge('Schwierigkeit ' + e.diff) : ''}${e.intensity ? badge('Intensität ' + e.intensity) : ''}${(e.phases || []).map(k => badge(GP[k].s + ' · ' + GP[k].l, GP[k].c)).join('')}${e.rating ? badge('★'.repeat(e.rating)) : ''}</div>
     <div class="sub" style="margin-top:14px">Feldspieler (grün = ideal, hell = möglich)</div><div class="fitgrid">${fitg}</div>
     ${rows.length ? `<dl class="kv" style="margin-top:14px">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : '<div class="mute small" style="margin-top:14px">Noch keine Beschreibung – über „Bearbeiten“ ergänzen.</div>'}
     ${e.link ? `<p><a class="link" href="${esc(e.link)}" target="_blank" rel="noopener">${icon('link')} Video / Link öffnen</a></p>` : ''}
@@ -921,7 +1061,7 @@ function exerciseForm(e = {}, isNew) {
   openForm({
     title: isNew ? 'Neue Übung' : 'Übung bearbeiten', value: e,
     fields: [[{ k: 'name', l: 'Name', auto: isNew }, { k: 'variant', l: 'Variante (z. B. 1, 2)' }],
-      { k: 'phases', l: 'Spielphasen', t: 'chips', opts: GP5.map(k => [k, GP[k].l]) },
+      { k: 'phases', l: 'Spielphasen', t: 'chips', opts: GP5.map(k => [k, GP[k].s + ' · ' + GP[k].l]) },
       { k: 'expl', l: 'Erklärung', t: 'textarea' }, { k: 'fit', l: 'Passt für … Feldspieler', t: 'fit' },
       { k: 'diff', l: 'Schwierigkeit', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
       { k: 'intensity', l: 'Intensität', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
@@ -985,8 +1125,8 @@ function topicList() {
   let ts = Store.all('topic').sort(byOrder);
   if (f.ph) ts = ts.filter(t => (t.phases || []).includes(f.ph) || (t.phases || []).includes('ALL'));
   let h = `<div class="small mute" style="margin:0 4px 8px">Dein Periodisierungsplan: Themen je Spielphase. Die Zahl zeigt, wie oft ein Thema schon im Training eingeplant ist.</div>`;
-  h += chips([['', 'Alle'], ...GP5.map(k => [k, k])], f.ph, 'topPh');
-  if (f.ph) h += `<div class="small" style="margin:0 4px 6px;color:${GP[f.ph].c};font-weight:700">${GP[f.ph].l}</div>`;
+  h += chips([['', 'Alle'], ...GP5.map(k => [k, gpS(k)])], f.ph, 'topPh');
+  if (f.ph) h += `<div class="small" style="margin:0 4px 6px;color:${GP[f.ph].c};font-weight:700">${GP[f.ph].s} · ${GP[f.ph].l}</div>`;
   for (const cat of TOPICCATS) {
     const list = ts.filter(t => t.cat === cat); if (!list.length) continue;
     h += sec(cat) + `<div class="card">${list.map(t => `<span class="topicchip" data-a="editTopic" data-id="${esc(t.id)}">${(t.phases || []).filter(p => p !== 'ALL').map(p => `<span class="dot" style="background:${GP[p]?.c};width:7px;height:7px"></span>`).join('')}${esc(t.title)}${use[t.id] ? ` <span class="n">${use[t.id]}×</span>` : ''}</span>`).join('')}</div>`;
@@ -997,7 +1137,7 @@ function topicForm(t = {}, isNew) {
   openForm({
     title: isNew ? 'Neues Thema' : 'Thema', value: { cat: 'Gruppentaktik', phases: UI.topics.ph ? [UI.topics.ph] : [], ...t },
     fields: [{ k: 'title', l: 'Thema', auto: isNew }, { k: 'cat', l: 'Kategorie', t: 'select', opts: TOPICCATS.map(c => [c, c]) },
-      { k: 'phases', l: 'Spielphasen', t: 'chips', opts: [...GP5.map(k => [k, GP[k].l]), ['ALL', 'alle Phasen']] }],
+      { k: 'phases', l: 'Spielphasen', t: 'chips', opts: [...GP5.map(k => [k, GP[k].s + ' · ' + GP[k].l]), ['ALL', 'alle Phasen']] }],
     onSave: async v => { if (!v.title) return toast('Bitte einen Titel eingeben'); Store.put(t.id || uid('topic'), 'topic', { ...(t.id ? Store.data(t.id) : { order: 999 }), ...v }); await Sheet.close(); render(); },
     onDelete: isNew ? null : async () => { if (!confirmDel('Thema')) return; Store.remove(t.id); await Sheet.close(); render(); },
   });
@@ -1009,7 +1149,7 @@ function pickDay(what, key, day) {
     title = 'Schwerpunkte';
     const ph = dd.phase, rank = t => (t.phases || []).includes(ph) ? 0 : (t.phases || []).includes('ALL') ? 1 : 2;
     opts = Store.all('topic').sort((a, b) => rank(a) - rank(b) || TOPICCATS.indexOf(a.cat) - TOPICCATS.indexOf(b.cat) || byOrder(a, b))
-      .map(t => ({ v: t.id, l: t.title, g: rank(t) === 0 ? `${GP[ph].l} · ${t.cat}` : rank(t) === 1 ? 'Für alle Phasen' : `Andere Phasen · ${t.cat}`, s: (t.phases || []).filter(x => x !== 'ALL').join(', ') }));
+      .map(t => ({ v: t.id, l: t.title, g: rank(t) === 0 ? `${GP[ph].l} · ${t.cat}` : rank(t) === 1 ? 'Für alle Phasen' : `Andere Phasen · ${t.cat}`, s: (t.phases || []).filter(x => x !== 'ALL').map(gpS).join(', ') }));
   } else if (what === 'exercises') {
     title = 'Übungen'; const n = UI.ex.n || setting().exPlayers || 16, ph = dd.phase;
     opts = Store.all('exercise').sort((a, b) => ((b.phases || []).includes(ph) - (a.phases || []).includes(ph)) || (((b.fit || {})[n] || 0) - ((a.fit || {})[n] || 0)) || byName(a, b))
@@ -1054,7 +1194,9 @@ function viewTests() {
   if (f.q) cl = cl.filter(c => (c.name + ' ' + c.stadt + ' ' + c.kreis + ' ' + c.trainer).toLowerCase().includes(f.q));
   if (f.lvls.size) cl = cl.filter(c => f.lvls.has(c.level || ''));
   cl.sort((a, b) => lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
-  let h = `<input class="search" type="search" placeholder="Verein, Stadt, Kreis suchen…" value="${esc(f.q)}" data-a="tQ"><div id="results">`;
+  const tg = Store.all('game').filter(g => g.type === 'Test' && !g.cancelled && g.date >= D.today()).sort(byDate);
+  let h = `<div class="linkrow" data-a="gTest">${icon('spiele', 'mini')}<span class="grow">Testspiele im Spielplan${tg.length ? ` · nächstes: <b>${esc(shortOpp(tg[0].opponent))}</b> ${D.short(tg[0].date)}` : ' · keins geplant'}</span>${icon('chev', 'chev')}</div>
+    <input class="search" type="search" placeholder="Verein, Stadt, Kreis suchen…" value="${esc(f.q)}" data-a="tQ"><div id="results">`;
   h += `<div class="chips wrapchips"><button class="chip ${f.lvls.size ? '' : 'on'}" data-a="tLvl" data-v="*">Alle Niveaus (${all})</button>${LEVELS.filter(l => l.k).map(l => `<button class="chip ${f.lvls.has(l.k) ? 'on' : ''}" data-a="tLvl" data-v="${l.k}">${esc(l.k)}</button>`).join('')}</div>`;
   h += chips([['', 'Jeder Status'], ...TSTATUS.map(s => [s.k, s.l.split(' –')[0]])], f.st, 'tSt');
   for (const S of TSTATUS) {
@@ -1065,13 +1207,14 @@ function viewTests() {
   }
   if (!cl.length) h += '<div class="empty">Keine Vereine für diese Auswahl.</div>';
   h += '</div>';
-  return { title: 'Testspielplanung', html: h, fab: 'newClub', actions: crestBtn() };
+  return { title: 'Testspielplanung', html: h, fab: 'newClub' };
 }
 function clubTile(c) {
   const n = contactsFor(c.name).length, L = LEVELS.find(l => l.k === (c.level || ''));
+  const g = Store.all('game').filter(x => !x.cancelled && x.date >= D.today() && sameClub(x.opponent, c.name)).sort(byDate)[0];
   return `<div class="ctile" data-a="openClub" data-id="${esc(c.id)}" style="--lc:${LVC[c.level || '']}">
     <div class="row" style="gap:6px"><span class="lvb">${esc(c.level || '–')}</span>${n ? `<span class="tiny mute">${icon('phone', 'mini')}${n}</span>` : ''}${c.result ? `<span class="tiny" style="margin-left:auto;font-weight:700">${esc(c.result)}</span>` : ''}</div>
-    <div class="cn">${esc(c.name)}</div><div class="cp">${esc(c.stadt || c.kreis || L?.l || '')}</div>
+    <div class="cn">${esc(c.name)}</div><div class="cp">${g ? `<b class="cgame">${icon('spiele', 'mini')}${D.short(g.date)}</b> ` : ''}${esc(c.stadt || c.kreis || L?.l || '')}</div>
     <div class="cflags"><button class="flagbtn ${c.requested ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="requested">angefragt</button><button class="flagbtn cb ${c.callback ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="callback">melden</button><button class="flagbtn ok ${c.done ? 'on' : ''}" data-a="clubFlag" data-id="${esc(c.id)}" data-f="done">fix</button></div></div>`;
 }
 function clubDetail(id) {
@@ -1147,7 +1290,7 @@ function viewMehr(parts) {
     <div class="card small"><div class="row"><span class="grow">${REMOTE ? `Angemeldet als <b>${esc(Store.user?.email || '')}</b>` : '<b>Lokaler Testmodus</b> – Daten nur in diesem Browser'}</span></div>
     ${REMOTE ? `<button class="btn sm" data-a="logout" style="margin-top:10px">Abmelden</button>` : ''}</div>
     <div class="tiny mute" style="text-align:center">Coaching-App · Version ${VERSION}</div>`;
-  return { title: 'Mehr', html, actions: crestBtn() };
+  return { title: 'Mehr', back: true, html };
 }
 function viewMaterial() {
   const tab = UI.mat, all = Store.all('material').sort(byOrder);
@@ -1233,15 +1376,36 @@ function emptyState() {
 }
 const notFound = () => ({ title: 'Nicht gefunden', back: true, html: '<div class="empty">Dieser Eintrag existiert nicht mehr.</div>' });
 
-const VIEWS = { saison: viewSaison, spiele: viewSpiele, kader: viewKader, training: viewTraining, tests: viewTests, mehr: viewMehr };
+const VIEWS = { heute: viewHeute, saison: viewSaison, spiele: viewSpiele, kader: viewKader, training: viewTraining, tests: viewTests, mehr: viewMehr };
 
 // ───────────────────────── Aktionen ─────────────────────────
 const A = {
-  tab: el => go('#/' + el.dataset.k),
+  tab: el => { const k = el.dataset.k; if (route().tab === k) { go('#/' + k); window.scrollTo({ top: 0, behavior: 'smooth' }); } else go(LAST[k] || '#/' + k); },
   open: el => go(el.dataset.h),
-  back: () => history.length > 1 ? history.back() : go('#/saison'),
+  back: () => history.length > 1 ? history.back() : go('#/heute'),
   syncInfo: () => toast(!REMOTE ? 'Lokaler Testmodus' : Store.error ? 'Fehler: ' + Store.error : Object.keys(Store.pending).length ? 'Speichert…' : 'Alles gespeichert ✓'),
   sheetClose: () => Sheet.close(),
+  quick: el => {
+    const ctx = el.dataset.ctx, t = D.today(), cur = phaseAt(t), pend = Store.all('game').filter(needsResult).sort(byDate)[0];
+    const CTX = { newGame: ['spiele', 'Neues Spiel'], newPlayer: ['kader', 'Neuer Spieler'], newExercise: ['training', 'Neue Übung'], newAthletic: ['training', 'Neue Athletikübung'],
+      newTopic: ['training', 'Neues Thema'], newClub: ['tests', 'Neuer Verein (Testspiel)'] };
+    const item = (x, ic, l, sub = '', attrs = '') => `<button class="qitem" data-a="quickDo" data-x="${x}" ${attrs}><span class="ti">${icon(ic)}</span><span class="grow"><b>${l}</b>${sub ? `<small>${sub}</small>` : ''}</span></button>`;
+    let b = '';
+    if (CTX[ctx]) b += item(ctx, CTX[ctx][0], CTX[ctx][1], 'passend zu dieser Seite');
+    if (pend) b += item('quickResult', 'spiele', 'Ergebnis eintragen', `${esc(pend.opponent)} · ${D.long(pend.date)}`, `data-id="${esc(pend.id)}"`);
+    if (ctx !== 'newGame') b += item('newGame', 'spiele', 'Neues Spiel', 'Liga, Test, Turnier …');
+    if (cur) b += item('addPtask', 'saison', 'Aufgabe', `für ${esc(cur.label)}`, `data-phase="${cur.id}" data-mode="meso"`);
+    b += item('open', 'training', 'Training dieser Woche planen', `KW ${D.week(t).week}`, `data-h="#/training/woche/${D.week(t).key}"`);
+    if (ctx !== 'newClub') b += item('newClub', 'tests', 'Testspiel-Verein', 'neuer Verein in der Testspielplanung');
+    b += item('newContact', 'phone', 'Kontakt');
+    if (ctx !== 'newPlayer') b += item('newPlayer', 'kader', 'Spieler');
+    if (ctx !== 'newExercise') b += item('newExercise', 'training', 'Übung');
+    b += item('newMat', 'box', 'Material', 'auf die Einkaufsliste');
+    Sheet.open('Schnell hinzufügen', `<div class="qlist">${b}</div>`);
+  },
+  quickDo: async el => { const x = el.dataset.x; await Sheet.close(); if (x === 'newMat') UI.mat = 'need'; A[x] && A[x](el); },
+  testsStatus: el => { UI.tests.st = el.dataset.v; go('#/tests'); render(); },
+  gTest: () => { UI.games.type = 'Test'; UI.games.when = 'all'; go('#/spiele'); render(); },
   formSave: () => FORM && FORM.onSave(readForm()),
   formDelete: () => FORM && FORM.onDelete && FORM.onDelete(),
   fitCycle: el => { const g = el.closest('[data-fit]'), v = JSON.parse(g.dataset.val), n = el.dataset.n, s = ((v[n] || 0) + 1) % 4; if (s) v[n] = s; else delete v[n]; g.dataset.val = JSON.stringify(v); el.className = 'fit' + s; },
@@ -1299,7 +1463,17 @@ const A = {
   tierMove: el => { const p = Store.data(el.dataset.id), i = TIER_RANK.indexOf(p.tier || ''), j = i < 0 ? 3 : Math.max(0, Math.min(3, i + +el.dataset.d)); Store.patch(el.dataset.id, 'player', { tier: TIER_RANK[j] }); toast(`${p.short || p.name} → ${tierOf(TIER_RANK[j]).l}`); render(); },
   quickResult: el => resultForm(Store.get(el.dataset.id)),
   // Training
-  dayPhase: el => { const k = el.dataset.week, d = el.dataset.day, cur = ((weekData(k).days || {})[d] || {}).phase; setDay(k, d, { phase: cur === el.dataset.ph ? '' : el.dataset.ph }); render(); },
+  phasePick: el => {
+    const k = el.dataset.week, d = el.dataset.day, wk = !d, cur = (wk ? weekData(k).phase : ((weekData(k).days || {})[d] || {}).phase) || '';
+    const opts = [...Object.entries(GP).filter(([x]) => !wk || x !== 'FREI'), ['', { s: '–', l: 'Keine Auswahl', c: 'var(--mute)' }]];
+    Sheet.open(wk ? `KW ${D.week(D.fromKey(k)).week} · Schwerpunkt der Woche` : `${WD[d]} ${D.short(D.add(D.fromKey(k), d - 1))} · Spielphase`, `<div class="phlist">${opts.map(([key, v]) =>
+      `<button class="${cur === key ? 'on' : ''}" style="--c:${v.c}" data-a="dayPhase" data-week="${k}" ${wk ? '' : `data-day="${d}"`} data-ph="${key}"><span class="phcode">${esc(v.s)}</span><span class="grow">${esc(v.l)}</span>${cur === key ? '✓' : ''}</button>`).join('')}</div>`);
+  },
+  dayPhase: async el => {
+    const k = el.dataset.week;
+    if (el.dataset.day) setDay(k, el.dataset.day, { phase: el.dataset.ph }); else Store.put('week:' + k, 'week', { ...weekData(k), phase: el.dataset.ph });
+    await Sheet.close(); render();
+  },
   pickDay: el => pickDay(el.dataset.what, el.dataset.week, el.dataset.day),
   exN: el => { UI.ex.n = Math.max(1, Math.min(21, (UI.ex.n || 16) + +el.dataset.d)); render(); },
   exOpen: el => exerciseDetail(el.dataset.id),
@@ -1323,6 +1497,7 @@ const A = {
   openClub: el => clubDetail(el.dataset.id),
   newClub: () => clubForm({}, true),
   editClub: el => clubForm(Store.get(el.dataset.id)),
+  clubFromGame: el => { const g = Store.get(el.dataset.id); clubForm({ name: shortOpp(g.opponent), done: true, result: D.short(g.date) }, true); },
   clubToGame: async el => { const c = Store.get(el.dataset.id); await Sheet.close(); gameForm({ opponent: c.name, type: 'Test', date: D.today() }, true); },
   // Kontakte
   newContact: () => contactForm({}, true),
@@ -1457,6 +1632,22 @@ async function startApp(user) {
   }
 }
 window.addEventListener('hashchange', render);
+// Wischen: links/rechts zwischen Reitern; vom linken Rand nach rechts = zurück
+const Swipe = { x: 0, y: 0, t: 0, ok: false };
+document.addEventListener('touchstart', e => {
+  const tt = e.touches[0], tgt = e.target;
+  Swipe.ok = e.touches.length === 1 && $('#sheet').hidden && !tgt.closest('.matrix,.chips,[data-drag],.board,input,textarea,select,.wstrip');
+  Object.assign(Swipe, { x: tt.clientX, y: tt.clientY, t: Date.now() });
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  if (!Swipe.ok || Drag.active) return;
+  const tt = e.changedTouches[0], dx = tt.clientX - Swipe.x, dy = tt.clientY - Swipe.y;
+  if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6 || Date.now() - Swipe.t > 700) return;
+  if (Swipe.x < 30 && dx > 0 && !$('#back').hidden) return A.back();
+  const seg = $('#view .seg'); if (!seg) return;
+  const bs = $$('button', seg), i = bs.findIndex(b => b.classList.contains('on')), j = i + (dx < 0 ? 1 : -1);
+  if (i >= 0 && bs[j]) { bs[j].click(); }
+}, { passive: true });
 window.addEventListener('online', () => Store.flush());
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && REMOTE && Store.user && $('#sheet').hidden) {
