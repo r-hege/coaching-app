@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.3';
+const VERSION = '1.4';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -118,7 +118,12 @@ function migratePositions() {
   if (n) Store.flushSoon();
 }
 const MAKRO = { HR: 'Hinrunde', RR: 'Rückrunde' };
-const PHC = { vorb: '#4a9fb5', wettk: '#5a63b8', nachb: '#a77bb8' };
+const PHC = { vorb: '#2f7fd1', wettk: '#5a4fcf', nachb: '#9150c9' }; // Blau → Indigo → Violett, gleich kräftig
+// Trainingsbewertung 1–5 (Farbbalken rot → blau)
+const RATE = { 1: { c: '#dc2626', l: 'schwach' }, 2: { c: '#f2711c', l: 'mäßig' }, 3: { c: '#eab308', l: 'okay' }, 4: { c: '#16a34a', l: 'gut' }, 5: { c: '#2563eb', l: 'top' } };
+// Offene Testspieltermine (???): gelten als besetzt, sobald an dem Tag ein Spiel steht
+const slotTaken = s => Store.all('game').some(g => !g.cancelled && g.date === s.date);
+const slots = () => Store.all('slot').filter(s => !slotTaken(s)).sort(byDate);
 const LEVELS = [
   { k: 'NLZ', l: 'NLZ' }, { k: 'Regio', l: 'Regionalliga' }, { k: 'VL', l: 'Verbandsliga' },
   { k: 'BZL', l: 'Bezirksliga' }, { k: 'SDL', l: 'Sonderliga' }, { k: '', l: 'Ohne Niveau' }];
@@ -426,41 +431,56 @@ function phaseLine(cur, t) {
   const weeks = weeksOf(cur), idx = weeks.findIndex(w => w.key === D.week(t).key);
   return `${MAKRO[cur.makro]} · ${esc(cur.label)} · Woche ${idx + 1}/${weeks.length}`;
 }
-function nextGameCard(g) {
-  const items = Store.all('checkitem'), done = items.filter(i => (g.checks || {})[i.id]).length, s = setting();
-  const club = findClub(g.opponent), L = club && LEVELS.find(l => l.k === club.level);
-  const n = D.diff(D.today(), g.date);
-  return `<div class="nextcard ng" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">
-    <div class="nc-top"><span class="nc-kind">${icon('spiele', 'mini')} Nächstes Spiel</span><span class="nc-when ${n <= 2 ? 'soon' : ''}">${relDay(g.date)}</span></div>
-    <div class="nc-title">${esc(g.opponent || 'Spiel')}</div>
-    <div class="nc-sub">${D.long(g.date)}${g.kickoff ? ' · ' + esc(g.kickoff) + ' Uhr' : ''}${g.ha ? ` · ${g.ha === 'H' ? 'Heim' : 'Auswärts'}` : ''}${g.type ? ' · ' + esc(g.type) : ''}${g.important ? ' · ⭐ wichtig' : ''}${L && L.k ? ' · ' + esc(L.l) : ''}</div>
-    <div class="nc-stats">
-      <span class="${(g.squad || []).length ? 'ok' : ''}"><b>${(g.squad || []).length}/${s.squadMax || 17}</b>Kader</span>
-      <span class="${(g.start11 || []).length === 11 ? 'ok' : ''}"><b>${(g.start11 || []).length}/11</b>Startelf</span>
-      <span class="${items.length && done === items.length ? 'ok' : ''}"><b>${done}/${items.length}</b>Checkliste</span>
-      <span class="${g.prep && Object.values(g.prep).some(Boolean) ? 'ok' : ''}"><b>${g.prep && Object.values(g.prep).some(Boolean) ? '✓' : '–'}</b>Plan</span></div></div>`;
+function gamePrep(g) {
+  const items = Store.all('checkitem'), done = items.filter(i => (g.checks || {})[i.id]).length;
+  const parts = [(g.squad || []).length > 0, (g.start11 || []).length === 11, !!items.length && done === items.length, !!(g.prep && Object.values(g.prep).some(Boolean))];
+  return { n: parts.filter(Boolean).length, of: parts.length };
 }
-function nextTrainingCard(t) {
-  const ph = phOf(t.key, t.wd), tops = (t.dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
-  const nEx = (t.dd.exercises || []).length, nAth = (t.dd.athletics || []).length, planned = ph || tops.length || nEx || nAth;
-  return `<div class="nextcard train" style="--c:${ph ? ph.c : 'var(--accent)'}" data-a="open" data-h="#/training/woche/${t.key}">
-    <div class="nc-top"><span class="nc-kind">${icon('training', 'mini')} ${t.date === D.today() ? 'Training heute' : 'Nächstes Training'}</span><span class="nc-when">${t.date === D.today() ? WD[t.wd] : relDay(t.date)}</span></div>
-    <div class="nc-title">${ph ? `<span class="phcode">${esc(ph.s)}</span> ${esc(ph.l)}` : WD[t.wd] + ' ' + D.short(t.date)}</div>
-    ${planned ? `<div class="nc-sub">${tops.length ? esc(tops.slice(0, 3).join(' · ')) + (tops.length > 3 ? ` +${tops.length - 3}` : '') : 'Noch keine Schwerpunkte'}</div>
-      <div class="nc-stats"><span class="${nEx ? 'ok' : ''}"><b>${nEx}</b>Übungen</span><span class="${nAth ? 'ok' : ''}"><b>${nAth}</b>Athletik</span><span class="${t.dd.note ? 'ok' : ''}"><b>${t.dd.note ? '✓' : '–'}</b>Notiz</span></div>`
-      : `<div class="nc-sub">Noch nicht geplant – antippen zum Planen</div>`}</div>`;
-}
-function weekStrip(t) {
-  const wk = D.week(t), mon = wk.monday, games = weekGames(wk.key);
-  let h = `<div class="wstrip">`;
+function weekCal(t) {
+  const wk = D.week(t), mon = wk.monday, games = weekGames(wk.key), cur = phaseAt(t), wph = GP[weekData(wk.key).phase], sl = slots();
+  let h = `<div class="wcal"><div class="wc-h" data-a="open" data-h="#/training/woche/${wk.key}"><div class="grow">
+      <div class="wc-kw">KW ${wk.week} <span>${D.short(mon)}–${D.short(D.add(mon, 6))}</span></div>
+      <div class="wc-sub">${cur ? phaseLine(cur, t) : 'keine Saisonphase'}</div></div>
+      ${wph ? `<span class="phcode" style="--c:${wph.c}" title="Schwerpunkt der Woche: ${esc(wph.l)}">${esc(wph.s)}</span>` : ''}<span class="link">Woche planen</span></div>
+    ${cur ? `<div class="thinbar"><i style="width:${Math.min(100, Math.round((D.diff(cur.start, t) + 1) / (D.diff(cur.start, cur.end) + 1) * 100))}%;background:${PHC[cur.type]}"></i></div>` : ''}<div class="wstrip">`;
   for (let i = 0; i < 7; i++) {
-    const d = D.add(mon, i), tr = trainingOn(d), g = games.find(x => x.date === d && !x.cancelled), ph = tr && phOf(tr.key, tr.wd);
-    const href = g ? '#/spiele/' + encodeURIComponent(g.id) : tr ? '#/training/woche/' + wk.key : '#/saison/woche/' + wk.key;
-    h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}">
-      <span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span>
-      <span class="wm">${g ? `<i class="mg ${outcome(g) ? 'o' + outcome(g) : ''}" title="${esc(g.opponent)}">${icon('spiele')}</i>` : ''}${tr ? `<i class="mt" style="--c:${ph ? ph.c : 'var(--mute)'}">${ph ? esc(ph.s) : 'T'}</i>` : ''}</span></button>`;
+    const d = D.add(mon, i), tr = trainingOn(d), g = games.find(x => x.date === d && !x.cancelled), q = sl.find(x => x.date === d), we = i >= 5;
+    const href = g ? '#/spiele/' + encodeURIComponent(g.id) : q ? '#/tests/termine' : '#/training/woche/' + wk.key;
+    let m = '';
+    if (g) m += `<i class="mg ${outcome(g) ? 'o' + outcome(g) : ''}" title="${esc(g.opponent)}">${icon('spiele')}</i>`;
+    if (q) m += `<i class="mq" title="Offener Testspieltermin">???</i>`;
+    if (tr) m += `<i class="mt" title="Training">${wph ? esc(wph.s) : 'T'}</i>`;
+    if (!m) m = `<small class="wfree">${we ? 'spiel&shy;frei' : 'trai&shy;nings&shy;frei'}</small>`;
+    h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}"><span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span><span class="wm">${m}</span></button>`;
   }
-  return h + `</div>`;
+  return h + `</div></div>`;
+}
+function agenda(t) {
+  const ev = [], sl = slots();
+  for (let i = 0; i < 14 && ev.length < 5; i++) {
+    const d = D.add(t, i);
+    for (const g of Store.all('game').filter(x => x.date === d && !x.cancelled)) ev.push({ d, k: 'g', g });
+    for (const q of sl.filter(x => x.date === d)) ev.push({ d, k: 'q', q });
+    const tr = trainingOn(d); if (tr) ev.push({ d, k: 't', tr });
+  }
+  if (!ev.length) return '';
+  const row = (e, href, cls, title, sub, right) => `<div class="ag ${cls}" data-a="open" data-h="${href}"><div class="ag-d"><span>${D.wd(e.d)}</span><b>${D.parse(e.d).getDate()}</b></div>
+    <div class="grow"><div class="ag-t">${title}</div><div class="ag-s">${sub}</div></div>${right}</div>`;
+  return `<div class="card agenda">${ev.slice(0, 5).map(e => {
+    const when = relDay(e.d);
+    if (e.k === 'g') {
+      const g = e.g, pr = gamePrep(g);
+      return row(e, '#/spiele/' + encodeURIComponent(g.id), 'g', `${esc(shortOpp(g.opponent))}${g.important ? ' ⭐' : ''}`,
+        `${when}${g.kickoff ? ' · ' + esc(g.kickoff) : ''}${g.ha ? ' · ' + (g.ha === 'H' ? 'Heim' : 'Auswärts') : ''}${g.type ? ' · ' + esc(g.type) : ''}`,
+        `<span class="ag-r ${pr.n === pr.of ? 'ok' : ''}"><b>${pr.n}/${pr.of}</b>bereit</span>`);
+    }
+    if (e.k === 'q') return row(e, '#/tests/termine', 'q', '??? · Gegner gesucht', `${when} · offener Testspieltermin`, `<span class="ag-r">suchen</span>`);
+    const tr = e.tr, wph = GP[weekData(tr.key).phase], bl = dayBlocks(tr.dd), tot = bl.reduce((x, b) => x + blockMin(b), 0), dur = trainingDur(tr.dd);
+    const tops = (tr.dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
+    return row(e, '#/training/woche/' + tr.key, 't', `Training${wph ? ` · <span class="phcode sm" style="--c:${wph.c}">${esc(wph.s)}</span> ${esc(wph.l)}` : ''}`,
+      `${when}${tops.length ? ' · ' + esc(tops.slice(0, 2).join(', ')) : ''}`,
+      `<span class="ag-r ${tot && tot >= dur ? 'ok' : ''}"><b>${tot}/${dur}</b>Min</span>`);
+  }).join('')}</div>`;
 }
 // Kader-Aufgabe: Wochenendspiel ab Freitag 18 Uhr, Spiel unter der Woche ab Sonntag 14 Uhr davor
 function squadDue(g) {
@@ -471,19 +491,9 @@ const todoRow = (ic, title, sub, attrs, right = '') => `<div class="todo" ${attr
 function viewHeute() {
   if (!phases().length && !Store.all('game').length) return { title: 'Heute', html: emptyState() };
   const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
-  const dl = D.parse(t).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
-  let h = `<div class="hello" data-a="open" data-h="#/saison"><div class="hd">${esc(dl)}</div>
-    <div class="hs">KW ${wk.week}${cur ? ' · ' + phaseLine(cur, t) : nxt ? ' · Pause bis ' + D.short(nxt.start) : ''}</div>
-    ${cur ? `<div class="thinbar"><i style="width:${Math.min(100, Math.round((D.diff(cur.start, t) + 1) / (D.diff(cur.start, cur.end) + 1) * 100))}%;background:${PHC[cur.type]}"></i></div>` : ''}</div>`;
-
-  const g = nextGame(t), tr = nextTraining(t);
-  const cards = [];
-  if (tr) cards.push([tr.date, nextTrainingCard(tr)]);
-  if (g) cards.push([g.date, nextGameCard(g)]);
-  cards.sort((a, b) => a[0].localeCompare(b[0]));
-  h += cards.map(c => c[1]).join('');
-  const wph = GP[weekData(wk.key).phase];
-  h += sec(`Diese Woche · KW ${wk.week}`, `${wph ? `<span class="phcode sm" style="--c:${wph.c}" title="Schwerpunkt der Woche: ${esc(wph.l)}">${esc(wph.s)}</span>` : ''}<button class="link" data-a="open" data-h="#/training/woche/${wk.key}">Woche planen</button>`) + weekStrip(t);
+  let h = weekCal(t);
+  const g = nextGame(t), ag = agenda(t);
+  if (ag) h += sec('Als Nächstes') + ag;
 
   // Zu erledigen – alles an einem Ort
   let todo = '', n = 0;
@@ -496,6 +506,8 @@ function viewHeute() {
   }
   for (const x of Store.all('game').filter(x => !x.cancelled && x.date >= t && D.diff(t, x.date) <= 8 && !(x.squad || []).length).sort(byDate))
     if (new Date() >= squadDue(x)) { n++; todo += todoRow('kader', `Kader für ${esc(shortOpp(x.opponent))} eintragen`, `${D.long(x.date)} · ${relDay(x.date)}`, `data-a="pickSquad" data-id="${esc(x.id)}"`); }
+  const os = slots().filter(x => x.date >= t);
+  if (os.length) { n++; todo += todoRow('tests', `${cap(os.length, 'offener Testspieltermin', 'offene Testspieltermine')} (???)`, os.map(x => D.wd(x.date) + ' ' + D.short(x.date)).join(' · '), `data-a="open" data-h="#/tests/termine"`); }
   const cb = Store.all('club').filter(c => clubStatus(c) === 'pending').length;
   if (cb) { n++; todo += todoRow('tests', `Testspiele: ${cap(cb, 'Verein', 'Vereine')} ohne Rückmeldung`, 'nachhaken in der Testspielplanung', `data-a="testsStatus" data-v="pending"`); }
   const noNum = players().filter(p => !p.number);
@@ -817,10 +829,13 @@ function viewSpiele(parts) {
     <div class="list">${todo.map(g => `<div class="li" data-a="quickResult" data-id="${esc(g.id)}"><div class="grow"><div class="t ell">${esc(g.opponent)}</div><div class="s">${D.long(g.date)} · ${esc(g.type || 'Spiel')}</div></div><span class="link">Eintragen</span></div>`).join('')}</div></div>`;
   if (!games.length) h += '<div class="empty">Keine Spiele für diese Auswahl.</div>';
   let month = null;
-  for (const g of games) {
-    const m = D.month(g.date);
+  const qs = f.when === 'past' || (f.type && f.type !== 'Test') ? [] : slots().filter(x => x.date >= t);
+  const items = [...games.map(g => ({ d: g.date, g })), ...qs.map(q => ({ d: q.date, q }))];
+  if (f.when !== 'past') items.sort((a, b) => a.d.localeCompare(b.d));
+  for (const it of items) {
+    const m = D.month(it.d);
     if (m !== month) { if (month) h += '</div>'; h += sec(m) + '<div class="gtiles">'; month = m; }
-    h += gameTile(g);
+    h += it.g ? gameTile(it.g) : `<div class="gtile up qtile" data-a="open" data-h="#/tests/termine"><div class="gd">${D.wd(it.d)} ${D.parse(it.d).getDate()}.</div><div class="go">???</div><div class="gr">Gegner?</div><div class="gt">offen</div></div>`;
   }
   if (month) h += '</div>';
   h += `<div class="legend" style="margin:12px 4px">${Object.values(OUT).map(o => `<span><span class="dot" style="background:${o.c};width:9px;height:9px"></span> ${o.l}</span>`).join('')}<span><span class="nbadge static">1</span> offen</span></div>`;
@@ -984,10 +999,27 @@ function tierBoard() {
   }
   const noGroup = ps.filter(p => !p.group);
   h += `</div>${noGroup.length ? `<div class="small mute" style="margin-top:10px">Ohne Mannschaftsteil: ${noGroup.map(p => `<a class="link" data-a="quickTier" data-id="${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}`;
-  h += sec('Tiefe pro Position') + `<div class="card"><div class="depth">${POSV.map(P => {
-    const c = r => eligible(P.k).filter(x => x.e.rank === r).length;
-    return `<div class="drow" data-a="posSheet" data-k="${P.k}"><b>${esc(P.l)}</b><span class="dn">${[0, 1, 2].map(r => `<span style="background:${TIERS[r].c};opacity:${c(r) ? 1 : .18}">${c(r)}</span>`).join('')}</span></div>`;
-  }).join('')}</div><div class="tiny mute" style="margin-top:8px">Anzahl Spieler je Position: <b style="color:${TIERS[0].c}">Top</b> · <b style="color:${TIERS[1].c}">Gut</b> · <b style="color:${TIERS[2].c}">Okay</b> – zeigt, wo der Kader dünn ist.</div></div>`;
+  h += depthView();
+  return h;
+}
+// Besetzung einer Position: mit Top-Spieler reicht 1 Guter dahinter; ohne Top 3 Gute oder 2 Gute + 2 Okay. 8,5 wird nicht bewertet.
+function depthInfo(k) {
+  const el = eligible(k), T = el.filter(x => x.e.rank === 0).length, G = el.filter(x => x.e.rank === 1).length, O = el.filter(x => x.e.rank === 2).length;
+  if (k === 'ACHTFUENF') return { T, G, O, st: 'skip', msg: 'wird nicht bewertet' };
+  if (T >= 1) return T + G >= 2 ? { T, G, O, st: 'ok', msg: 'Top + Absicherung' } : { T, G, O, st: 'thin', msg: 'es fehlt 1 Guter hinter dem Top-Spieler' };
+  if (G >= 3 || (G === 2 && O >= 2)) return { T, G, O, st: 'ok', msg: G >= 3 ? `${G} Gute` : '2 Gute + Okay dahinter' };
+  const a = `${3 - G}× Gut`, nG = Math.max(0, 2 - G), nO = Math.max(0, 2 - O), b = [nG ? `${nG}× Gut` : '', nO ? `${nO}× Okay` : ''].filter(Boolean).join(' + ');
+  return { T, G, O, st: 'thin', msg: `kein Top · es fehlen ${a}${b && b !== a ? ' oder ' + b : ''}` };
+}
+function depthView() {
+  const all = POSV.map(P => ({ P, ...depthInfo(P.k) })), thin = all.filter(x => x.st === 'thin'), rest = all.filter(x => x.st !== 'thin');
+  const tile = x => `<div class="dtile ${x.st}" data-a="posSheet" data-k="${x.P.k}"><div class="dt-h"><b>${esc(x.P.l)}</b><span class="dt-st">${x.st === 'ok' ? '✓' : x.st === 'thin' ? '!' : '–'}</span></div>
+    <div class="dt-n">${[['T', 0, 'Top'], ['G', 1, 'Gut'], ['O', 2, 'Okay']].map(([f, r, l]) => `<span style="--tc:${TIERS[r].c}" class="${x[f] ? '' : 'zero'}"><b>${x[f]}</b>${l}</span>`).join('')}</div>
+    <div class="dt-m">${esc(x.msg)}</div></div>`;
+  let h = sec('Tiefe pro Position', `<span class="tiny">${thin.length ? `<b style="color:#dc2626">${thin.length} zu dünn</b>` : '<b style="color:#16a34a">alle gut besetzt</b>'}</span>`);
+  h += `<div class="card"><div class="tiny mute" style="margin-bottom:10px">Regel: Mit Top-Spieler reicht <b>1 Guter</b> dahinter. Ohne Top braucht es <b>3 Gute</b> – oder <b>2 Gute + 2 Okay</b>. 8,5 zählt nicht.</div>`;
+  if (thin.length) h += `<div class="dgrp bad">Zu dünn besetzt · ${thin.length}</div><div class="dgrid">${thin.map(tile).join('')}</div>`;
+  h += `<div class="dgrp">Ausreichend · ${rest.filter(x => x.st === 'ok').length}</div><div class="dgrid">${rest.map(tile).join('')}</div></div>`;
   return h;
 }
 function quickTier(id) {
@@ -1189,11 +1221,15 @@ function periodView() {
     h += `<div class="pmeso" style="--pc:${PHC[p.type]}"><div class="pm-h"><b>${esc(p.label)}</b> <span>${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></div>${distBar(ws.map(w => w.key))}</div>`;
     h += `<div class="card list pweeks">`;
     for (const w of ws) {
-      const ph = GP[weekData(w.key).phase], games = weekGames(w.key);
+      const ph = GP[weekData(w.key).phase], games = weekGames(w.key), wdd = weekData(w.key).days || {}, qs = slots().filter(x => x.date >= w.monday && x.date <= D.add(w.monday, 6));
+      const sq = (setting().trainingDays || [2, 4, 5]).map(d => { const date = D.add(w.monday, d - 1), r = RATE[(wdd[d] || {}).rating];
+        return `<i class="pw-sq ${r ? 'r' : date < D.today() ? 'past' : ''}" style="${r ? `--rc:${r.c}` : ''}" title="${WD[d]} ${D.short(date)}${r ? ' · Bewertung ' + wdd[d].rating + '/5' : ''}">${WD[d].slice(0, 2)}</i>`; }).join('');
       h += `<div class="pw ${w.key === curKey ? 'now' : ''}" ${w.key === curKey ? 'id="pw-now"' : ''}>
         <button class="pw-ph ${ph ? 'set' : ''}" style="--c:${ph ? ph.c : 'var(--line)'}" data-a="phasePick" data-week="${w.key}" aria-label="Schwerpunkt wählen">${ph ? esc(ph.s) : '+'}</button>
-        <div class="grow pw-mid" data-a="open" data-h="#/training/woche/${w.key}"><div class="pw-kw">KW ${w.week}${w.key === curKey ? ' <span class="todaytag">jetzt</span>' : ''}</div><div class="tiny mute">${D.short(w.monday)}–${D.short(D.add(w.monday, 6))}${ph ? ' · ' + esc(ph.l) : ''}</div></div>
-        <div class="pw-games">${games.map(g => { const o = outcome(g); return `<span class="pwg ${o ? 'o' + o : ''} ${g.cancelled ? 'cx' : ''}" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}" title="${esc(g.opponent)}"><b>${D.wd(g.date)}</b> ${esc(shortOpp(g.opponent).slice(0, 14))}${g.type ? ` <i>${esc(g.type)}</i>` : ''}</span>`; }).join('')}</div></div>`;
+        <div class="grow pw-mid" data-a="open" data-h="#/training/woche/${w.key}"><div class="pw-kw">KW ${w.week}</div><div class="tiny mute">${D.short(w.monday)}–${D.short(D.add(w.monday, 6))}</div></div>
+        <div class="pw-sqs" data-a="open" data-h="#/training/woche/${w.key}">${sq}</div>
+        <div class="pw-games">${[...games.map(g => ({ d: g.date, g })), ...qs.map(q => ({ d: q.date, q }))].sort((a, b) => a.d.localeCompare(b.d)).map(x => { if (x.q) return `<span class="pwg q" data-a="open" data-h="#/tests/termine" title="Offener Testspieltermin ${D.short(x.d)}">???</span>`;
+          const g = x.g, o = outcome(g); return `<span class="pwg ${o ? 'o' + o : ''} ${g.cancelled ? 'cx' : ''}" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}" title="${esc(g.opponent)} · ${D.long(g.date)}">${esc(shortOpp(g.opponent))}</span>`; }).join('')}</div></div>`;
     }
     h += `</div>`;
   }
@@ -1239,17 +1275,29 @@ function mesoDistribution(p) {
   return `<div class="distbar">${keys.map(k => `<i style="width:${cnt[k] / total * 100}%;background:${GP[k].c}"></i>`).join('')}</div>
     <div class="legend">${keys.map(k => `<span><span class="dot" style="background:${GP[k].c};width:8px;height:8px"></span> ${gpS(k)} ${cnt[k]}×</span>`).join('')}</div>`;
 }
+function rateRow(key, d, dd) {
+  return `<div class="rate"><span>Wie war das Training?</span>${[1, 2, 3, 4, 5].map(n => `<button class="${dd.rating === n ? 'on' : ''}" style="--rc:${RATE[n].c}" data-a="rate" data-week="${key}" data-day="${d}" data-v="${n}" aria-label="${n} von 5 – ${RATE[n].l}">${n}</button>`).join('')}</div>`;
+}
 function trainingWeek(key) {
   const mon = D.fromKey(key), p = phaseAt(mon) || phaseAt(D.add(mon, 6)), w = weekData(key), days = setting().trainingDays || [2, 4, 5];
   const prev = D.week(D.add(mon, -7)).key, next = D.week(D.add(mon, 7)).key, wp = GP[w.phase];
   let h = `<div class="weekhead"><div class="wh-nav"><button class="iconbtn" data-a="open" data-h="#/training/woche/${prev}" aria-label="Vorherige Woche">${icon('left')}</button>
-    <div class="grow"><div class="wh-kw">KW ${D.week(mon).week} <span class="wh-dates">${D.short(mon)}–${D.short(D.add(mon, 6))}</span>${key === D.week(D.today()).key ? ' <span class="todaytag">jetzt</span>' : ''}</div><div class="wh-sub">${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div></div>
+    <div class="grow"><div class="wh-kw">KW ${D.week(mon).week} <span class="wh-dates">${D.short(mon)}–${D.short(D.add(mon, 6))}</span></div><div class="wh-sub">${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div></div>
     <button class="iconbtn" data-a="open" data-h="#/training/woche/${next}" aria-label="Nächste Woche">${icon('right')}</button></div>
     <button class="phpick wk ${wp ? 'set' : ''}" style="--c:${wp ? wp.c : 'var(--mute)'}" data-a="phasePick" data-week="${key}">
       <span class="wk-main">${wp ? `<span class="phcode">${esc(wp.s)}</span> ${esc(wp.l)}` : 'Schwerpunkt der Woche wählen'}</span><small>${wp ? 'Schwerpunkt der Woche · antippen zum Ändern' : 'Spielphase, die diese Woche im Mittelpunkt steht'}</small></button>
     ${p ? `<div class="wh-dist"><div class="tiny mute">Wochenschwerpunkte in der ${esc(p.label)} bisher</div>${mesoDistribution(p)}</div>` : ''}</div>`;
+  let past = '';
+  UI.pastOpen = UI.pastOpen || {};
   for (const d of days) {
     const date = D.add(mon, d - 1), dd = (w.days || {})[d] || {}, ph = wp;
+    if (date < D.today() && !UI.pastOpen[key + d]) {
+      const gs = gamesBetween(date, date), r = RATE[dd.rating];
+      past += `<div class="pastday"><div class="pd-h" data-a="togglePast" data-k="${key}${d}"><span class="pd-ok">✓</span><b>${WD[d].slice(0, 2)} ${D.short(date)}</b>
+        <span class="grow tiny mute ell">${gs.length ? 'Spiel: ' + esc(shortOpp(gs[0].opponent)) : (dd.topics || []).length ? esc((dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean).join(', ')) : 'Training'}</span>
+        ${r ? `<span class="ratechip" style="--rc:${r.c}">${dd.rating}/5</span>` : ''}${icon('down', 'chev')}</div>${rateRow(key, d, dd)}</div>`;
+      continue;
+    }
     const tops = (dd.topics || []).map(id => Store.get(id)).filter(Boolean);
     const exs = (dd.exercises || []).map(id => Store.get(id)).filter(Boolean);
     const aths = (dd.athletics || []).map(id => Store.get(id)).filter(Boolean);
@@ -1261,8 +1309,10 @@ function trainingWeek(key) {
       <div class="sub"><span class="grow">Schwerpunkte</span><button class="link" data-a="pickDay" data-what="topics" data-week="${key}" data-day="${d}">+ wählen</button></div>
       <div>${tops.map(t => `<span class="topicchip">${esc(t.title)}</span>`).join('') || '<span class="tiny mute">Aus dem Periodisierungsplan wählen</span>'}</div>
       <div class="sub"><span class="grow">Ablauf</span></div>${dayPlan(key, d, dd)}`}
-      <div class="f" style="margin:10px 0 0"><textarea data-a="dayNote" data-week="${key}" data-day="${d}" placeholder="Notiz zum Training…" style="min-height:52px">${esc(dd.note || '')}</textarea></div></div>`;
+      <div class="f" style="margin:10px 0 0"><textarea data-a="dayNote" data-week="${key}" data-day="${d}" placeholder="Notiz zum Training…" style="min-height:52px">${esc(dd.note || '')}</textarea></div>
+      ${date <= D.today() ? rateRow(key, d, dd) : ''}${date < D.today() ? `<button class="link" data-a="togglePast" data-k="${key}${d}" style="margin-top:6px">Einklappen</button>` : ''}</div>`;
   }
+  if (past) h += sec('Schon vorbei') + `<div class="card pastlist">${past}</div>`;
   h += `<div class="tiny mute" style="margin:4px">Trainingstage änderst du über das Wappen oben rechts → Einstellungen.</div>`;
   return h;
 }
@@ -1437,7 +1487,46 @@ const TSTATUS = [
   { k: 'fix', l: 'Fix', s: 'fix', d: 'Testspiel steht', c: '#15803d' }];
 const LVC = { NLZ: '#312e81', Regio: '#7c3aed', VL: '#0e7490', BZL: '#15803d', SDL: '#a16207', '': '#94a3b8' };
 const lvlRank = k => { const i = LEVELS.findIndex(l => l.k === (k || '')); return i < 0 ? 99 : i; };
-function viewTests() {
+function viewTests(parts = []) {
+  const sub = parts[0] === 'pool' ? 'pool' : 'termine', nq = slots().filter(x => x.date >= D.today()).length;
+  const seg = `<div class="seg">${[['termine', `Offene Termine${nq ? ` (${nq})` : ''}`], ['pool', 'Gegnerpool']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/tests/${v}">${l}</button>`).join('')}</div>`;
+  if (sub === 'termine') return { title: 'Testspielplanung', html: seg + termineView(), fab: 'newSlot' };
+  const r = poolView(); r.html = seg + r.html; return r;
+}
+function slotCands(q) {
+  const want = q.levels || [];
+  return Store.all('club').filter(c => clubStatus(c) !== 'fix' && (!want.length || want.includes(c.level || '')))
+    .sort((a, b) => (clubStatus(a) === 'pending' ? 0 : 1) - (clubStatus(b) === 'pending' ? 0 : 1) || lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
+}
+function slotCard(q) {
+  const p = phaseAt(q.date), c = slotCands(q), n = D.diff(D.today(), q.date);
+  return `<div class="card qslot"><div class="sl-h"><div class="sl-q">???</div><div class="grow"><div class="sl-d">${D.long(q.date)}${q.kickoff ? ' · ' + esc(q.kickoff) + ' Uhr' : ''}</div>
+      <div class="tiny mute">${relDay(q.date)}${p ? ' · ' + esc(phaseName(p)) : ''}${q.ha ? ' · ' + (q.ha === 'H' ? 'Heim' : 'Auswärts') : ''}</div></div>
+      <span class="sl-days ${n <= 21 ? 'soon' : ''}">${n} T.</span><button class="iconbtn" data-a="editSlot" data-id="${esc(q.id)}" aria-label="Bearbeiten">${icon('edit')}</button></div>
+    ${q.note ? `<div class="small" style="margin:8px 0 0">${esc(q.note)}</div>` : ''}
+    <div class="sub"><span class="grow">Passende Vereine · ${(q.levels || []).length ? q.levels.map(esc).join(', ') : 'jedes Niveau'} · ${c.length}</span>${c.length ? `<button class="link" data-a="slotPool" data-id="${esc(q.id)}">im Gegnerpool</button>` : ''}</div>
+    <div class="sl-c">${c.slice(0, 6).map(x => `<span class="slc" data-a="openClub" data-id="${esc(x.id)}"><i style="background:${LVC[x.level || '']}">${esc(x.level || '–')}</i>${esc(x.name)}${clubStatus(x) === 'pending' ? ' <b>wartet</b>' : ''}</span>`).join('') || '<span class="tiny mute">Keine Vereine für dieses Niveau im Gegnerpool.</span>'}</div>
+    <button class="btn primary sm" style="margin-top:10px" data-a="slotFound" data-id="${esc(q.id)}">Gegner gefunden → als Spiel eintragen</button></div>`;
+}
+function termineView() {
+  const t = D.today(), all = slots(), up = all.filter(x => x.date >= t), past = all.filter(x => x.date < t);
+  let h = `<div class="tiny mute" style="margin:0 4px 10px">Freie Tage, an denen noch ein Testspielgegner fehlt. Sie stehen als <b>???</b> in Heute, im Spielplan und in der Periodisierung – sobald an dem Tag ein Spiel eingetragen ist, verschwinden sie.</div>`;
+  h += up.map(slotCard).join('') || '<div class="empty">Keine offenen Termine. Mit + einen freien Tag anlegen.</div>';
+  if (past.length) h += sec('Vorbei, ohne Gegner') + `<div class="card list">${past.map(x => `<div class="li" data-a="editSlot" data-id="${esc(x.id)}"><div class="grow"><div class="t">${D.long(x.date)}</div><div class="s">${esc(x.note || 'kein Spiel eingetragen')}</div></div>${icon('edit', 'chev')}</div>`).join('')}</div>`;
+  return h;
+}
+function slotForm(q = {}, isNew) {
+  openForm({
+    title: isNew ? 'Offener Termin' : 'Termin bearbeiten', value: { ha: '', levels: [], ...q },
+    fields: [{ k: 'date', l: 'Datum', t: 'date' }, { k: 'kickoff', l: 'Uhrzeit (optional)', t: 'time' },
+      { k: 'ha', l: 'Heim / Auswärts', t: 'seg', opts: [['', 'egal'], ['H', 'Heim'], ['A', 'Auswärts']] },
+      { k: 'levels', l: 'Gesuchtes Niveau', t: 'chips', opts: LEVELS.filter(l => l.k).map(l => [l.k, l.k]) },
+      { k: 'note', l: 'Notiz', t: 'textarea', ph: 'z. B. starker Gegner, ab 13 Uhr' }],
+    onSave: async v => { if (!v.date) return toast('Bitte ein Datum wählen'); Store.put(q.id || 'slot:' + v.date + ':' + uid('s').slice(-4), 'slot', { ...(q.id ? Store.data(q.id) : {}), ...v }); await Sheet.close(); render(); },
+    onDelete: isNew ? null : async () => { if (!confirmDel('Termin')) return; Store.remove(q.id); await Sheet.close(); render(); },
+  });
+}
+function poolView() {
   const f = UI.tests; if (!(f.lvls instanceof Set)) f.lvls = new Set();
   if (!['', 'none', 'pending', 'fix'].includes(f.st)) f.st = '';
   let cl = Store.all('club');
@@ -1649,7 +1738,17 @@ function viewSettings() {
     <div class="two"><div class="f"><label>Max. Spieltagskader</label><input type="number" data-a="setNum" data-f="squadMax" value="${esc(s.squadMax || 17)}"></div>
     <div class="f"><label>Feldspieler (Standard Übungen)</label><input type="number" data-a="setNum" data-f="exPlayers" value="${esc(s.exPlayers || 16)}"></div></div>
     <button class="btn sm" data-a="editDress">Dresscode bearbeiten</button></div>`;
-  h += sec('Spieltag-Checkliste', '<button class="link" data-a="newCheck">+ Punkt</button>') + `<div class="card list">${Store.all('checkitem').sort(byOrder).map(c => `<div class="li" data-a="editCheck" data-id="${c.id}"><div class="grow"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.group)}</div></div>${icon('edit', 'chev')}</div>`).join('')}</div>`;
+  h += sec('Spieltag-Checkliste', '<button class="link" data-a="newCheck">+ Punkt</button>') + `<div class="card"><div class="clgrid">${Store.all('checkitem').sort(byOrder).map(c => `<div class="cli" data-a="editCheck" data-id="${c.id}"><span class="t">${esc(c.title)}</span>${c.group ? `<small>${esc(c.group)}</small>` : ''}</div>`).join('')}</div></div>`;
+  const cur = phaseAt(D.today());
+  h += sec('Checklisten der Zyklen', '<span class="tiny">alle Aufgaben je Phase</span>') + phases().map(p => {
+    const meso = tasksOf(p.id, 'meso'), mikro = tasksOf(p.id, 'mikro'), done = meso.filter(x => x.done).length;
+    return `<details class="cyc" ${cur && cur.id === p.id ? 'open' : ''} style="--pc:${PHC[p.type]}"><summary><span class="dot" style="background:${PHC[p.type]}"></span><span class="grow"><b>${esc(p.label)}</b> <span class="tiny mute">${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></span><span class="cyc-n">${done}/${meso.length}</span></summary>
+      <div class="cyc-b"><div class="sub"><span class="grow">Einmal in der Phase</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button></div>
+      ${meso.length ? `<div class="list checks">${meso.map(x => check(x.done, x.title, `data-a="ptask" data-id="${esc(x.id)}"`)).join('')}</div>` : '<div class="tiny mute">Keine.</div>'}
+      <div class="sub"><span class="grow">Jede Woche</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button></div>
+      ${mikro.length ? `<div class="clgrid">${mikro.map(x => `<div class="cli" data-a="editPtask" data-id="${esc(x.id)}"><span class="t">${esc(x.title)}</span></div>`).join('')}</div>` : '<div class="tiny mute">Keine.</div>'}
+      <button class="link" data-a="open" data-h="#/saison/phase/${p.id}" style="margin-top:8px">Phase öffnen · Aufgaben bearbeiten</button></div></details>`;
+  }).join('');
   h += sec('Daten') + `<div class="card"><div class="small mute" style="margin-bottom:10px">Import: deine Excel-Daten (Datei <b>coaching-daten.json</b>) einmalig hochladen. Export: Sicherungskopie aller Daten.</div>
     <label class="btn" style="margin-right:6px">Daten importieren<input type="file" accept=".json,application/json" data-a="importFile" hidden></label>
     <button class="btn" data-a="export">Sicherung herunterladen</button>
@@ -1705,7 +1804,13 @@ const A = {
     Sheet.open('Schnell hinzufügen', `<div class="qlist">${b}</div>`);
   },
   quickDo: async el => { const x = el.dataset.x; await Sheet.close(); if (x === 'newMat') UI.mat = 'need'; A[x] && A[x](el); },
-  testsStatus: el => { UI.tests.st = el.dataset.v; go('#/tests'); render(); },
+  testsStatus: el => { UI.tests.st = el.dataset.v; go('#/tests/pool'); render(); },
+  newSlot: () => slotForm({ date: D.add(D.today(), 14) }, true),
+  editSlot: el => slotForm(Store.get(el.dataset.id)),
+  slotPool: el => { const q = Store.data(el.dataset.id); UI.tests.lvls = new Set(q.levels || []); UI.tests.st = ''; go('#/tests/pool'); },
+  slotFound: el => { const q = Store.data(el.dataset.id); gameForm({ date: q.date, kickoff: q.kickoff || '', ha: q.ha || '', type: 'Test' }, true); },
+  rate: el => { const { week: k, day: d } = el.dataset, v = +el.dataset.v, cur = ((weekData(k).days || {})[d] || {}).rating; setDay(k, d, { rating: cur === v ? 0 : v }); if (cur !== v) toast(`Training bewertet: ${v}/5`); render(); },
+  togglePast: el => { UI.pastOpen = UI.pastOpen || {}; UI.pastOpen[el.dataset.k] = !UI.pastOpen[el.dataset.k]; render(); },
   gTest: () => { UI.games.type = 'Test'; UI.games.when = 'all'; go('#/spiele'); render(); },
   formSave: () => FORM && FORM.onSave(readForm()),
   formDelete: () => FORM && FORM.onDelete && FORM.onDelete(),
