@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.7';
+const VERSION = '1.8';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -123,7 +123,21 @@ const PHC = { vorb: '#2f7fd1', wettk: '#5a4fcf', nachb: '#9150c9' }; // Blau →
 const RATE = { 1: { c: '#dc2626', l: 'schwach' }, 2: { c: '#f2711c', l: 'mäßig' }, 3: { c: '#eab308', l: 'okay' }, 4: { c: '#16a34a', l: 'gut' }, 5: { c: '#2563eb', l: 'top' } };
 // Offene Testspieltermine (???): gelten als besetzt, sobald an dem Tag ein Spiel steht
 const slotTaken = s => Store.all('game').some(g => !g.cancelled && g.date === s.date);
-const slots = () => Store.all('slot').filter(s => !slotTaken(s)).sort(byDate);
+// Ferien: Kalenderwochen, gespeichert in setting:holidays { weeks: { '2026-W43': 'Herbstferien', … } }
+const holidays = () => (Store.data('setting:holidays') || {}).weeks || {};
+const isHoliday = date => !!holidays()[D.week(date).key];
+// Offene Testspieltermine: gespeicherte Termine + automatisch jedes Wochenende (Sa/So) in der Saison außerhalb der Ferien, ohne Spiel
+function allSlots() {
+  const stored = Store.all('slot'), byDay = new Map(stored.map(x => [x.date, x])), ps = phases(), out = [...stored];
+  if (ps.length) {
+    const games = Store.all('game').filter(g => !g.cancelled), busy = new Set([...games.map(g => g.date), ...games.map(g => g.alt).filter(Boolean)]);
+    let d = D.today() > ps[0].start ? D.today() : ps[0].start; const end = ps[ps.length - 1].end;
+    for (; d <= end; d = D.add(d, 1)) { const wd = dayIdx(d); if (wd < 6 || byDay.has(d) || busy.has(d) || isHoliday(d)) continue; out.push({ id: 'slot:' + d, date: d, auto: true }); }
+  }
+  return out;
+}
+const slots = () => allSlots().filter(s => !s.free && !slotTaken(s)).sort(byDate);
+const freeSlots = () => Store.all('slot').filter(s => s.free && s.date >= D.today()).sort(byDate);
 const LEVELS = [
   { k: 'NLZ', l: 'NLZ' }, { k: 'Regio', l: 'Regionalliga' }, { k: 'VL', l: 'Verbandsliga' },
   { k: 'BZL', l: 'Bezirksliga' }, { k: 'SDL', l: 'Sonderliga' }, { k: '', l: 'Ohne Niveau' }];
@@ -256,8 +270,10 @@ const go = h => { location.hash = h; };
 let LAST = {}; try { LAST = JSON.parse(localStorage.getItem('ca_last') || '{}'); } catch (_) { }
 
 let lastHash = null;
+const NAV = { stack: [], back: false };
 function render() {
   const r = route(), sameRoute = lastHash === location.hash, y = window.scrollY;
+  if (lastHash && !sameRoute) { if (NAV.back) NAV.back = false; else { NAV.stack.push(lastHash); if (NAV.stack.length > 40) NAV.stack.shift(); } }
   lastHash = location.hash;
   if (!location.hash.includes('periodisierung')) periodView._done = false;
   if (!location.hash.includes('kalender')) calView._done = false;
@@ -266,12 +282,11 @@ function render() {
   try { out = (VIEWS[r.tab] || VIEWS.heute)(r.parts); }
   catch (e) { console.error(e); out = { title: 'Fehler', html: `<div class="card">Da ist etwas schiefgelaufen: ${esc(e.message)}</div>` }; }
   $('#title').textContent = out.title || 'Coaching';
-  $('#back').hidden = !out.back;
+  $('#back').hidden = !(NAV.stack.length || out.back);
   $('#topActions').innerHTML = (out.actions || '') + crestBtn(r.tab === 'mehr');
   const main = !out.back;
   if (main && TABS.some(t => t.k === r.tab)) { LAST[r.tab] = location.hash || '#/' + r.tab; try { localStorage.setItem('ca_last', JSON.stringify(LAST)); } catch (_) { } }
-  $('#view').innerHTML = out.html + (main ? `<button class="fab" data-a="quick" data-ctx="${out.fab || ''}" aria-label="Schnell hinzufügen">${icon('plus')}</button>`
-    : out.fab ? `<button class="fab" data-a="${out.fab}" aria-label="Neu">${icon('plus')}</button>` : '');
+  $('#view').innerHTML = out.html + (!main && out.fab ? `<button class="fab" data-a="${out.fab}" aria-label="Neu">${icon('plus')}</button>` : '');
   window.scrollTo(0, sameRoute ? y : 0);
   document.documentElement.style.setProperty('--toph', $('#top').offsetHeight + 'px');
   if (Sheet.kind === 'todo' && !$('#sheet').hidden) todoSheet();
@@ -459,7 +474,7 @@ function weekCal(t) {
     if (q) m += `<i class="mq" title="Offener Testspieltermin">???</i>`;
     if (Store.all('game').some(x => x.alt === d && !x.cancelled)) m += `<i class="mq red" title="Spieltag evtl. Sonntag">?</i>`;
     for (const e of eventsOn(d)) m += `<i class="me" title="${esc(e.title)}">${esc(e.title.slice(0, 6))}</i>`;
-    if (tr) m += `<i class="mt" title="Training">${wph ? esc(wph.s) : 'T'}</i>`;
+    if (tr) m += tr.dd.cancelled ? `<i class="mt cx" title="Training abgesagt">T</i>` : `<i class="mt" title="Training">${wph ? esc(wph.s) : 'T'}</i>`;
     if (!m) m = `<small class="wfree">${we ? 'spiel&shy;frei' : 'trai&shy;nings&shy;frei'}</small>`;
     h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}"><span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span><span class="wm">${m}</span></button>`;
   }
@@ -487,6 +502,7 @@ function agenda(t) {
     if (e.k === 'q') return row(e, '#/tests/termine', 'q', '??? · Gegner gesucht', `${when} · offener Testspieltermin`, `<span class="ag-r">suchen</span>`);
     const tr = e.tr, wph = GP[weekData(tr.key).phase], bl = dayBlocks(tr.dd), tot = bl.reduce((x, b) => x + blockMin(b), 0), dur = trainingDur(tr.dd);
     const tops = (tr.dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
+    if (tr.dd.cancelled) return row(e, '#/training/woche/' + tr.key, 't cx', 'Training abgesagt', when, '');
     return row(e, '#/training/woche/' + tr.key, 't', `Training${wph ? ` · <span class="phcode sm" style="--c:${wph.c}">${esc(wph.s)}</span> ${esc(wph.l)}` : ''}`,
       `${when}${tops.length ? ' · ' + esc(tops.slice(0, 2).join(', ')) : ''}`,
       `<span class="ag-r ${tot && tot >= dur ? 'ok' : ''}"><b>${tot}/${dur}</b>Min</span>`);
@@ -512,7 +528,7 @@ function todoData() {
   for (const x of Store.all('game').filter(x => !x.cancelled && x.date >= t && D.diff(t, x.date) <= 8 && !(x.squad || []).length).sort(byDate))
     if (new Date() >= squadDue(x)) { n++; todo += todoRow('kader', `Kader für ${esc(shortOpp(x.opponent))} eintragen`, `${D.long(x.date)} · ${relDay(x.date)}`, `data-a="pickSquad" data-id="${esc(x.id)}"`); }
   const os = slots().filter(x => x.date >= t);
-  if (os.length) { n++; todo += todoRow('tests', `${cap(os.length, 'offener Testspieltermin', 'offene Testspieltermine')} (???)`, os.map(x => D.wd(x.date) + ' ' + D.short(x.date)).join(' · '), `data-a="open" data-h="#/tests/termine"`); }
+  if (os.length) { n++; todo += todoRow('tests', `${cap(os.length, 'offener Testspieltermin', 'offene Testspieltermine')} (???)`, os.slice(0, 4).map(x => D.wd(x.date) + ' ' + D.short(x.date)).join(' · ') + (os.length > 4 ? ' …' : ''), `data-a="open" data-h="#/tests/termine"`); }
   const cb = Store.all('club').filter(c => clubStatus(c) === 'pending').length;
   if (cb) { n++; todo += todoRow('tests', `Testspiele: ${cap(cb, 'Verein', 'Vereine')} ohne Rückmeldung`, 'nachhaken in der Testspielplanung', `data-a="testsStatus" data-v="pending"`); }
   const noNum = players().filter(p => !p.number);
@@ -573,10 +589,10 @@ function seasonTimeline(t) {
   for (const p of ps) segs += `<i class="seg-${p.type} ${p.end < t ? 'gone' : ''}" style="left:${pos(p.start)}%;width:${(D.diff(p.start, p.end) + 1) / total * 100}%;background:${TLC[p.type]}" data-a="open" data-h="#/saison/phase/${p.id}" title="${esc(phaseName(p))}"></i>`;
   for (const mk of ['HR', 'RR']) { const m = ps.filter(p => p.makro === mk); if (m.length) labels += `<span style="left:${pos(m[0].start)}%">${MAKRO[mk]}</span>`; }
   const pct = now != null ? Math.round(now) : null;
-  return `<div class="card tline">${now != null ? `<div class="tl-pillrow"><span class="tl-pill" style="left:${now}%">heute · ${pct}% der Saison</span></div>` : ''}<div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b><span class="tl-past" style="width:${now}%"></span>` : ''}</div><div class="tl-lab">${labels}</div>
+  return `<div class="card tline"><div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b><span class="tl-past" style="width:${now}%"></span>` : ''}</div><div class="tl-lab">${labels}</div>
     <div class="legend">${[['vorb', 'Vorbereitung'], ['wettk', 'Wettkampf'], ['nachb', 'Nachbereitung']].map(([k, l]) => `<span><span class="dot" style="background:${TLC[k]};width:8px;height:8px"></span> ${l}</span>`).join('')}<span><b class="tl-key"></b> heute</span></div></div>`;
 }
-const TLC = { vorb: '#b7a6ee', nachb: '#9581dc', wettk: '#5a3fc0' };
+const TLC = { vorb: '#9581dc', nachb: '#b7a6ee', wettk: '#5a3fc0' };
 const phaseDone = p => { const m = tasksOf(p.id, 'meso'); return { n: m.filter(x => x.done).length, of: m.length, all: m.length > 0 && m.every(x => x.done) }; };
 function seasonHead(t, cur, nxt) {
   if (!cur) return nxt ? `<div class="shead pause"><div class="sh-eye">Saisonpause</div><div class="sh-title">${esc(nxt.label)} startet ${relDay(nxt.start)}</div><div class="sh-sub">${esc(phaseName(nxt))} · ${D.long(nxt.start)}</div></div>` : '';
@@ -639,46 +655,43 @@ function mesoCard(p, st) {
     <div class="prog"><i style="width:${pd.of ? Math.round(pd.n / pd.of * 100) : (done ? 100 : 0)}%"></i></div>
     <div class="tiny mute" style="margin-top:4px">${done ? 'Alles erledigt – abgehakt' : `${pd.n}/${pd.of} Aufgaben erledigt`}</div></div>${mark}</div>`;
 }
+const FERIEN = { on: false };
 function calPop(el) {
-  const d = el.dataset.d, key = D.week(d).key, old = $('#calpop'); if (old) old.remove();
-  const gs = Store.all('game').filter(g => g.date === d && !g.cancelled), q = slots().filter(x => x.date === d), alt = Store.all('game').filter(g => g.alt === d && !g.cancelled), ev = eventsOn(d), tr = trainingOn(d);
-  const row = (h, t, s, cls = '') => `<div class="cp-r ${cls}" ${h ? `data-a="open" data-h="${h}"` : ''}><div class="grow"><b>${t}</b>${s ? `<small>${s}</small>` : ''}</div>${h ? icon('chev', 'chev') : ''}</div>`;
-  let b = gs.map(g => row('#/spiele/' + encodeURIComponent(g.id), esc(g.opponent), [hasRes(g) ? `<span class="cp-res">${esc(resText(g))}</span>` : '', g.kickoff ? esc(g.kickoff) + ' Uhr' : '', g.type ? esc(g.type) : '', g.ha === 'H' ? 'Heim' : g.ha === 'A' ? 'Auswärts' : ''].filter(Boolean).join(' · '))).join('');
-  b += q.map(() => row('#/tests/termine', '??? Testspielgegner gesucht', 'offener Termin', 'red')).join('');
-  b += alt.map(g => row('#/spiele/' + encodeURIComponent(g.id), '? ' + esc(g.opponent), 'Spieltag evtl. an diesem Sonntag', 'red')).join('');
-  b += ev.map(e => row('', esc(e.title), 'Event')).join('');
-  if (tr) b += row('#/training/woche/' + key, 'Training', '');
+  const d = el.dataset.g, old = $('#calpop'); if (old) old.remove(); if (!d) return;
+  const gs = Store.all('game').filter(g => g.date === d && !g.cancelled); if (!gs.length) return;
   const p = document.createElement('div'); p.id = 'calpop';
-  p.innerHTML = `<div class="cp-h">${D.long(d)}</div>${b}<button class="link cp-w" data-a="open" data-h="#/training/woche/${key}">Woche planen ›</button>`;
-  p.dataset.y = scrollY; document.body.appendChild(p);
-  const r = el.getBoundingClientRect(), w = Math.min(280, innerWidth - 20);
-  p.style.width = w + 'px'; p.style.left = Math.max(10, Math.min(innerWidth - w - 10, r.left + r.width / 2 - w / 2)) + 'px';
-  const below = r.bottom + 6 + p.offsetHeight < innerHeight - 70; p.style.top = (below ? r.bottom + 6 : r.top - p.offsetHeight - 6) + 'px';
+  p.innerHTML = gs.map(g => `<div class="cp-r"><b>${esc(shortOpp(g.opponent))}</b>${hasRes(g) ? `<span class="cp-res">${esc(resText(g))}</span>` : ''}</div>`).join('');
+  document.body.appendChild(p);
+  const r = el.getBoundingClientRect(), w = p.offsetWidth;
+  p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+  p.style.top = (r.top - p.offsetHeight - 6 > 60 ? r.top - p.offsetHeight - 6 : r.bottom + 6) + 'px';
 }
-document.addEventListener('click', e => { const p = $('#calpop'); if (p && !e.target.closest('#calpop') && !e.target.closest('[data-a=calPop]')) p.remove(); if (p && e.target.closest('#calpop [data-a=open]')) setTimeout(() => p.remove(), 0); }, true);
-window.addEventListener('scroll', () => { const p = $('#calpop'); if (p && Math.abs(scrollY - (+p.dataset.y || 0)) > 40) p.remove(); }, { passive: true });
-document.addEventListener('mouseover', e => { if (!matchMedia('(hover:hover)').matches) return; const c = e.target.closest && e.target.closest('.cd[data-a=calPop]'); if (c && c !== calPop._last) { calPop._last = c; calPop(c); } else if (!c && !(e.target.closest && e.target.closest('#calpop'))) { calPop._last = null; } });
+document.addEventListener('mouseover', e => {
+  if (!matchMedia('(hover:hover)').matches) return;
+  const c = e.target.closest && e.target.closest('.cd[data-g]');
+  if (c !== calPop._last) { calPop._last = c; const old = $('#calpop'); if (old) old.remove(); if (c) calPop(c); }
+});
+window.addEventListener('scroll', () => { const p = $('#calpop'); if (p) { p.remove(); calPop._last = null; } }, { passive: true });
 // Kalender: alle Wochen der Saison untereinander, Mo–So wie in der Kabine
 function calView() {
-  const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots();
+  const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots(), hols = holidays();
   const games = Store.all('game').filter(g => !g.cancelled), alts = new Set(games.map(g => g.alt).filter(Boolean));
-  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-e">E</i> Event</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span></div><div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
+  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-e">E</i> Event</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span><button class="ferbtn ${FERIEN.on ? 'on' : ''}" data-a="ferienMode">${FERIEN.on ? '✓ Fertig' : '+ Ferien'}</button></div>${FERIEN.on ? '<div class="ferhint">Wochen antippen, um sie als Ferien zu markieren – nochmal antippen entfernt sie. Danach „Fertig“.</div>' : ''}<div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
   while (m <= ps[ps.length - 1].end) {
-    const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6)), days = weekDays(w.key), evs = weekEvents(w.key);
+    const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6)), days = weekDays(w.key), evs = weekEvents(w.key), hol = hols[w.key];
     if (p && p !== lastP && (!lastP || p.id !== lastP.id)) { h += `<div class="cal-ph" style="--pc:${PHC[p.type]}"><b>${esc(p.label)}</b> ${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</div>`; lastP = p; }
     let cells = '';
     for (let i = 0; i < 7; i++) {
-      const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p, alt = alts.has(d), ev = evs.filter(e => e.d === i + 1);
+      const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p && !(((wd.days || {})[i + 1] || {}).cancelled), alt = alts.has(d), ev = evs.filter(e => e.d === i + 1);
       let mk = gs.map(g => { const open = /offen|\?\?\?/i.test(g.opponent || ''); return `<i class="cm-g ${open ? 'qq' : ''}">${open ? '?' : ''}</i>`; }).join('');
       if (q.length) mk += `<i class="cm-q">???</i>`;
       if (alt) mk += `<i class="cm-q">?</i>`;
       if (tr) mk += `<i class="cm-t">T</i>`;
       if (ev.length) mk += `<i class="cm-e">E</i>`;
-      const pop = gs.length || q.length || alt || ev.length;
-      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''}" ${pop ? `data-a="calPop" data-d="${d}"` : `data-a="open" data-h="#/training/woche/${w.key}"`}><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
+      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''} ${hol ? 'hol' : ''}" ${gs.length ? `data-g="${d}"` : ''} data-a="${FERIEN.on ? 'ferienWeek' : 'open'}" data-week="${w.key}" data-h="#/training/woche/${w.key}"><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
     }
-    h += `<div class="cw ${w.key === curKey ? 'now' : ''} ${D.add(m, 6) < t ? 'pastw' : ''}" ${w.key === curKey ? 'id="cw-now"' : ''}>
-      <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'kein Schwerpunkt'}"><b>KW ${w.week}</b><small>${D.short(m)}</small></div>
+    h += `<div class="cw ${w.key === curKey ? 'now' : ''} ${D.add(m, 6) < t ? 'pastw' : ''} ${hol ? 'hol' : ''}" ${w.key === curKey ? 'id="cw-now"' : ''}>
+      <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" ${FERIEN.on ? `data-a="ferienWeek" data-week="${w.key}"` : ''} title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'kein Schwerpunkt'}"><b>KW ${w.week}</b><small title="${hol ? esc(hol) : ''}">${hol ? 'Ferien' : D.short(m)}</small></div>
       <div class="cw-days">${cells}</div>
       <button class="cw-plan" data-a="open" data-h="#/training/woche/${w.key}" aria-label="Woche planen" title="Woche planen">${icon('edit')}</button></div>`;
     m = D.add(m, 7);
@@ -1242,7 +1255,7 @@ const TPH = [{ k: 'akt', l: 'Aktivierung', c: '#db2777' }, { k: 'uebung', l: 'Ü
 const TPH_OPT = [{ k: 'ath', l: 'Athletik', c: '#0891b2' }, { k: 'extra', l: 'Extra-Training', c: '#7c3aed' }, { k: 'video', l: 'Videoanalyse', c: '#64748b' }];
 const tphOf = k => [...TPH, ...TPH_OPT].find(x => x.k === k) || { k, l: k, c: '#94a3b8' };
 // Schwerpunkt einer Übung: Spielphasen + Aktivierung
-const FOCUS = { ...Object.fromEntries(GP5.map(k => [k, GP[k]])), AKT: { s: 'AKT', l: 'Aktivierung', c: '#db2777' } };
+const FOCUS = { ...Object.fromEntries(GP5.map(k => [k, GP[k]])), ATH: GP.ATH, AKT: { s: 'AKT', l: 'Aktivierung', c: '#db2777' } };
 const focusBadge = k => FOCUS[k] ? badge(FOCUS[k].s, FOCUS[k].c) : '';
 function dayBlocks(dd) {
   if (Array.isArray(dd.blocks)) return dd.blocks;
@@ -1285,7 +1298,7 @@ function dayPlan(key, d, dd) {
     h += `</div>`;
   });
   const missing = TPH_OPT.filter(o => !blocks.some(b => b.k === o.k));
-  if (missing.length) h += `<div class="blk-opt">${missing.map(o => `<button class="chip" data-a="blkAdd" data-week="${key}" data-day="${d}" data-k="${o.k}">+ ${esc(o.l)}</button>`).join('')}</div>`;
+  h += `<div class="blk-opt">${missing.map(o => `<button class="chip" data-a="blkAdd" data-week="${key}" data-day="${d}" data-k="${o.k}">+ ${esc(o.l)}</button>`).join('')}<button class="cxbtn" data-a="trCancel" data-week="${key}" data-day="${d}">abgesagt</button></div>`;
   h += `<div class="timebar ${st}"><span>Zeit</span><b>${total}</b><span>von</span><label class="minf"><input type="number" min="0" inputmode="numeric" data-a="dayDur" data-week="${key}" data-day="${d}" value="${dur}"><span>Min</span></label>
     <span class="grow tb-msg">${st === 'exact' ? 'passt genau' : st === 'over' ? (total - dur) + ' Min zu viel' : (dur - total) + ' Min frei'}</span></div>`;
   return h;
@@ -1401,6 +1414,12 @@ function trainingWeek(key) {
   UI.pastOpen = UI.pastOpen || {};
   for (const d of days) {
     const date = D.add(mon, d - 1), dd = (w.days || {})[d] || {}, ph = wp;
+    if (dd.cancelled) {
+      const row = `<div class="pastday cxday"><div class="pd-h"><span class="pd-x">✕</span><b>${WD[d]} ${D.short(date)}</b><span class="grow tiny mute">Training abgesagt</span>
+        <button class="cxbtn on" data-a="trCancel" data-week="${key}" data-day="${d}">abgesagt</button></div></div>`;
+      if (date < D.today()) past += row; else h += `<div class="card pastlist">${row}</div>`;
+      continue;
+    }
     if (date < D.today() && !UI.pastOpen[key + d]) {
       const gs = gamesBetween(date, date), r = RATE[dd.rating];
       past += `<div class="pastday"><div class="pd-h" data-a="togglePast" data-k="${key}${d}"><span class="pd-ok">✓</span><b>${WD[d].slice(0, 2)} ${D.short(date)}</b>
@@ -1477,7 +1496,7 @@ function exerciseForm(e = {}, isNew) {
       { k: 'phases', l: 'Schwerpunkt (was trainiert die Übung?)', t: 'chips', opts: Object.entries(FOCUS).map(([k, v]) => [k, v.s + ' · ' + v.l]) },
       { k: 'expl', l: 'Erklärung', t: 'textarea' }, { k: 'fit', l: 'Passt für … Feldspieler', t: 'fit' },
       { k: 'diff', l: 'Schwierigkeit', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
-      { k: 'intensity', l: 'Intensität', t: 'seg', opts: [...LVL3.map(x => [x, x]), ['', 'offen']] },
+      { k: 'intensity', l: 'Intensität', t: 'seg', opts: LVL3.map(x => [x, x]), def: 'mittel' },
       { k: 'rating', l: 'Bewertung', t: 'seg', opts: [[0, '–'], [1, '★'], [2, '★★'], [3, '★★★'], [4, '★★★★'], [5, '★★★★★']] },
       { k: 'setup', l: 'Aufbau', t: 'textarea' }, { k: 'material', l: 'Material' },
       { k: 'pros', l: 'Vorteile', t: 'textarea' }, { k: 'cons', l: 'Nachteile', t: 'textarea' },
@@ -1612,19 +1631,22 @@ function slotCands(q) {
     .sort((a, b) => (clubStatus(a) === 'pending' ? 0 : 1) - (clubStatus(b) === 'pending' ? 0 : 1) || lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
 }
 function slotCard(q) {
-  const p = phaseAt(q.date), n = D.diff(D.today(), q.date);
-  return `<div class="card qslot ${q.wip ? 'wip' : ''}"><div class="sl-h"><button class="sl-q" data-a="slotWip" data-id="${esc(q.id)}" aria-label="${q.wip ? 'In Bearbeitung – antippen zum Zurücksetzen' : 'Als in Bearbeitung markieren'}">???</button>
-      <div class="grow"><div class="sl-d">${D.long(q.date)}${q.kickoff ? ' · ' + esc(q.kickoff) + ' Uhr' : ''}</div>
-      <div class="tiny mute">${relDay(q.date)}${p ? ' · ' + esc(phaseName(p)) : ''}${q.ha ? ' · ' + (q.ha === 'H' ? 'Heim' : 'Auswärts') : ''}</div></div>
-      <span class="sl-days ${n <= 21 && !q.wip ? 'soon' : ''}">${n} T.</span><button class="iconbtn" data-a="editSlot" data-id="${esc(q.id)}" aria-label="Bearbeiten">${icon('edit')}</button></div>
-    <div class="sl-body">${q.note ? `<div class="small" style="margin:8px 0 0">${esc(q.note)}</div>` : ''}
-    <button class="btn primary sm" style="margin-top:10px" data-a="slotFound" data-id="${esc(q.id)}">Gegner gefunden → als Spiel eintragen</button>
-    ${q.wip ? `<div class="sl-wip" data-a="slotWip" data-id="${esc(q.id)}"><b>In Bearbeitung</b><small>antippen, um es wieder zu öffnen</small></div>` : ''}</div></div>`;
+  const n = D.diff(D.today(), q.date), id = esc(q.id), lv = q.levels || [];
+  return `<div class="card qslot cq ${q.wip ? 'wip' : ''}"><div class="sl-h"><button class="sl-q" data-a="slotWip" data-id="${id}" data-date="${q.date}" aria-label="In Bearbeitung umschalten">???</button>
+      <div class="grow"><div class="sl-d">${D.long(q.date)}</div><div class="tiny mute">${relDay(q.date)}</div></div>
+      <span class="sl-days ${n <= 21 && !q.wip ? 'soon' : ''}">${n} T.</span><button class="sl-free" data-a="slotSet" data-id="${id}" data-date="${q.date}" data-f="free" data-v="1">spielfrei</button></div>
+    <div class="sl-body"><div class="sl-row">${LEVELS.filter(l => l.k).map(l => `<button class="sl-lv ${lv.includes(l.k) ? 'on' : ''}" style="--lc:${LVC[l.k]}" data-a="slotSet" data-id="${id}" data-date="${q.date}" data-f="levels" data-v="${l.k}">${l.k}</button>`).join('')}</div>
+    <div class="sl-row"><span class="sl-ha">${[['', 'egal'], ['H', 'Heim'], ['A', 'Ausw.']].map(([v, l]) => `<button class="${(q.ha || '') === v ? 'on' : ''}" data-a="slotSet" data-id="${id}" data-date="${q.date}" data-f="ha" data-v="${v}">${l}</button>`).join('')}</span>
+      <input class="sl-time" type="time" value="${esc(q.kickoff || '')}" data-a="slotTime" data-id="${id}" data-date="${q.date}" aria-label="Uhrzeit">
+      <button class="sl-res ${q.reserved ? 'on' : ''}" data-a="slotSet" data-id="${id}" data-date="${q.date}" data-f="reserved" data-v="1">${q.reserved ? '✓ ' : ''}Platz reserviert</button></div>
+    <button class="btn primary sm sl-found" data-a="slotFound" data-id="${id}" data-date="${q.date}">Gegner gefunden → als Spiel eintragen</button>
+    ${q.wip ? `<div class="sl-wip" data-a="slotWip" data-id="${id}" data-date="${q.date}"><b>In Bearbeitung</b><small>antippen, um es wieder zu öffnen</small></div>` : ''}</div></div>`;
 }
 function termineView() {
-  const t = D.today(), all = slots(), up = all.filter(x => x.date >= t).sort((a, b) => (a.wip ? 1 : 0) - (b.wip ? 1 : 0) || byDate(a, b)), past = all.filter(x => x.date < t);
-  let h = up.length ? `<div class="tiny mute" style="margin:0 4px 10px">Tipp: <b>???</b> antippen = in Bearbeitung (rutscht nach unten).</div>` + up.map(slotCard).join('')
-    : `<div class="cleanbox"><div class="cb-i">✓</div><b>Alle Termine vergeben.</b><span>Kein ??? mehr – hier ist alles clean.</span></div>`;
+  const t = D.today(), up = slots().filter(x => x.date >= t).sort((a, b) => (a.wip ? 1 : 0) - (b.wip ? 1 : 0) || byDate(a, b)), past = Store.all('slot').filter(x => x.date < t && !x.free && !slotTaken(x)), fr = freeSlots();
+  let h = `<div class="tiny mute row" style="margin:0 4px 10px"><span class="grow">Jedes Wochenende außerhalb der Ferien ohne Spiel steht hier. <b>???</b> = in Bearbeitung.</span><button class="link" data-a="newSlot">+ anderer Tag</button></div>`;
+  h += up.length ? up.map(slotCard).join('') : `<div class="cleanbox"><div class="cb-i">✓</div><b>Alle Termine vergeben.</b><span>Kein ??? mehr – hier ist alles clean.</span></div>`;
+  if (fr.length) h += sec(`Spielfrei · ${fr.length}`) + `<div class="card list">${fr.map(x => `<div class="li"><div class="grow"><div class="t">${D.long(x.date)}</div></div><button class="link" data-a="slotSet" data-id="${esc(x.id)}" data-date="${x.date}" data-f="free" data-v="0">wieder öffnen</button></div>`).join('')}</div>`;
   if (past.length) h += sec('Vorbei, ohne Gegner') + `<div class="card list">${past.map(x => `<div class="li" data-a="editSlot" data-id="${esc(x.id)}"><div class="grow"><div class="t">${D.long(x.date)}</div><div class="s">${esc(x.note || 'kein Spiel eingetragen')}</div></div>${icon('edit', 'chev')}</div>`).join('')}</div>`;
   return h;
 }
@@ -2041,7 +2063,9 @@ const A = {
   },
   evDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.events = (w.events || []).filter(e => e.id !== el.dataset.id); Store.put('week:' + k, 'week', w); render(); },
   xDayDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.extraDays = (w.extraDays || []).filter(d => d !== +el.dataset.day); Store.put('week:' + k, 'week', w); render(); },
-  calPop: (el, e) => calPop(el),
+  ferienMode: () => { FERIEN.on = !FERIEN.on; if (!FERIEN.on) toast('Ferien gespeichert'); render(); },
+  ferienWeek: el => { const k = el.dataset.week, h = { ...holidays() }; if (h[k]) delete h[k]; else h[k] = 'Ferien'; Store.put('setting:holidays', 'setting', { ...(Store.data('setting:holidays') || {}), weeks: h }); render(); },
+  trCancel: el => { const k = el.dataset.week, d = el.dataset.day, dd = ((weekData(k).days || {})[d]) || {}; setDay(k, d, { cancelled: !dd.cancelled }); render(); },
   newGoal: () => goalForm({ area: UI.ziele || 'training', sub: UI.ziele === 'ideen' ? 'Multisportiv' : '' }, true),
   editGoal: el => { const g = Store.get(el.dataset.id); if (g) goalForm(g); },
   ideaDone: el => { const g = Store.data(el.dataset.id); if (!g) return; Store.put(el.dataset.id, 'goal', { ...g, done: !g.done, doneAt: !g.done ? D.today() : '' }); if (!g.done) toast('Gemacht ✓'); render(); },
@@ -2054,8 +2078,15 @@ const A = {
   },
   todoGo: async el => { await Sheet.close(); go(el.dataset.h); },
   todoTests: async el => { await Sheet.close(); UI.tests.st = el.dataset.v; go('#/tests/pool'); },
-  slotWip: el => { const q = Store.data(el.dataset.id); if (!q) return; Store.put(el.dataset.id, 'slot', { ...q, wip: !q.wip }); toast(q.wip ? 'Wieder offen' : 'In Bearbeitung'); render(); },
-  back: () => history.length > 1 ? history.back() : go('#/heute'),
+  slotWip: el => { const id = el.dataset.id, q = Store.data(id) || { date: el.dataset.date }; Store.put(id, 'slot', { ...q, wip: !q.wip }); toast(q.wip ? 'Wieder offen' : 'In Bearbeitung'); render(); },
+  slotSet: el => {
+    const id = el.dataset.id, q = { ...(Store.data(id) || { date: el.dataset.date }) }, f = el.dataset.f, v = el.dataset.v;
+    if (f === 'levels') { const l = new Set(q.levels || []); l.has(v) ? l.delete(v) : l.add(v); q.levels = [...l]; }
+    else if (f === 'free' || f === 'reserved') { q[f] = v === '1' ? !q[f] : false; if (f === 'free' && q.free) toast('Spielfrei'); }
+    else q[f] = v;
+    Store.put(id, 'slot', q); render();
+  },
+  back: () => { if (NAV.stack.length) { NAV.back = true; go(NAV.stack.pop()); } else go('#/heute'); },
   syncInfo: () => toast(!REMOTE ? 'Lokaler Testmodus' : Store.error ? 'Fehler: ' + Store.error : Object.keys(Store.pending).length ? 'Speichert…' : 'Alles gespeichert ✓'),
   sheetClose: () => Sheet.close(),
   quick: el => {
@@ -2081,7 +2112,7 @@ const A = {
   newSlot: () => slotForm({ date: D.add(D.today(), 14) }, true),
   editSlot: el => slotForm(Store.get(el.dataset.id)),
   slotPool: el => { const q = Store.data(el.dataset.id); UI.tests.lvls = new Set(q.levels || []); UI.tests.st = ''; go('#/tests/pool'); },
-  slotFound: el => { const q = Store.data(el.dataset.id); gameForm({ date: q.date, kickoff: q.kickoff || '', ha: q.ha || '', type: 'Test' }, true); },
+  slotFound: el => { const q = Store.data(el.dataset.id) || { date: el.dataset.date }; gameForm({ date: q.date, kickoff: q.kickoff || '', ha: q.ha || '', type: 'Test' }, true); },
   rate: el => { const { week: k, day: d } = el.dataset, v = +el.dataset.v, cur = ((weekData(k).days || {})[d] || {}).rating; setDay(k, d, { rating: cur === v ? 0 : v }); if (cur !== v) toast(`Training bewertet: ${v}/5`); render(); },
   togglePast: el => { UI.pastOpen = UI.pastOpen || {}; UI.pastOpen[el.dataset.k] = !UI.pastOpen[el.dataset.k]; render(); },
   gTest: () => { UI.games.type = 'Test'; UI.games.when = 'all'; go('#/spiele'); render(); },
@@ -2265,6 +2296,7 @@ document.addEventListener('change', e => {
   const el = e.target, a = el.dataset.a;
   if (el.closest('#sheet') && el.closest('[data-multi]')) { updateCounts($('#sheet')); return; }
   if (['ptask', 'wtask', 'gcheck', 'matDone', 'ideaDone'].includes(a)) return A[a](el, e);
+  if (a === 'slotTime') { const id = el.dataset.id; Store.put(id, 'slot', { ...(Store.data(id) || { date: el.dataset.date }), kickoff: el.value }); return toast('Gespeichert'); }
   if (a === 'exSel') { UI.ex[el.dataset.f] = el.value; return render(); }
   if (a === 'weekField') { const k = el.dataset.week, w = { ...weekData(k), [el.dataset.f]: el.value }; Store.put('week:' + k, 'week', w); return toast('Gespeichert'); }
   if (a === 'dayNote') { setDay(el.dataset.week, el.dataset.day, { note: el.value }); return toast('Gespeichert'); }
@@ -2343,6 +2375,16 @@ function migrate13() {
       if (dayIdx(sat) === 6) Store.put(g.id, 'game', { ...Store.data(g.id), date: sat, alt: D.add(sat, 1) }, true);
     }
     Store.put('setting:migr16', 'setting', { done: D.today() }, true);
+  }
+  if (!Store.data('setting:migr18') && phases().length) {
+    if (!Store.data('setting:holidays')) {
+      const weeks = {}, R = [['2026-07-20', '2026-09-01', 'Sommerferien'], ['2026-10-17', '2026-10-31', 'Herbstferien'], ['2026-12-23', '2027-01-06', 'Weihnachtsferien'], ['2027-03-22', '2027-04-03', 'Osterferien'], ['2027-07-19', '2027-08-31', 'Sommerferien']];
+      for (const [a, b, n] of R) for (let m = D.week(a).monday; m <= b; m = D.add(m, 7)) { let c = 0; for (let i = 0; i < 5; i++) { const x = D.add(m, i); if (x >= a && x <= b) c++; } if (c >= 3) weeks[D.week(m).key] = n; }
+      Store.put('setting:holidays', 'setting', { weeks, src: 'NRW 2026/27' }, true);
+    }
+    const hv = phases().find(p => p.makro === 'HR' && p.type === 'vorb');
+    if (hv && !tasksOf(hv.id, 'meso').some(x => /ferien/i.test(x.title || ''))) Store.put('ptask:ferien-hr', 'ptask', { phase: hv.id, mode: 'meso', title: 'Ferien für die Saison eintragen (Saison → Kalender → + Ferien)', done: true, order: 1 }, true);
+    Store.put('setting:migr18', 'setting', { done: D.today() }, true);
   }
   Undo.off--; if (Object.keys(Store.pending).length) Store.flushSoon();
 }

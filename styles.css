@@ -1001,3 +1001,45 @@ b.stp{color:var(--accent);font-weight:700}
 .evd{font-size:12px;font-weight:800;background:#c2410c;color:#fff;border-radius:7px;padding:2px 7px;white-space:nowrap}
 .xtag{font-size:11px;font-weight:800;background:var(--accentSoft);color:var(--accent);border-radius:999px;padding:2px 8px;vertical-align:2px}
 .wd .me{font-style:normal;font-size:8.5px;font-weight:800;color:#fff;background:#c2410c;border-radius:5px;padding:0 3px;line-height:1.5;max-width:42px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+/* ───── Version 1.8 ───── */
+/* Reiterleiste: Abstand zur Kopfzeile bleibt beim Scrollen gleich */
+main>.seg:first-child,main>.seg.stick{top:calc(var(--toph,60px) + 12px);outline:0;box-shadow:0 -12px 0 var(--bg),0 8px 0 -2px var(--bg),0 12px 12px -10px rgba(0,0,0,.18)}
+.cw.head{top:calc(var(--toph,60px) + 12px + 44px)}
+/* Kalender: kleines Hover-Fenster nur für Spiele */
+#calpop{padding:6px 10px;border-radius:10px;pointer-events:none;width:auto;max-width:220px}
+#calpop .cp-r{border:0;padding:2px 0;gap:10px;cursor:default}
+#calpop .cp-r b{font-size:13px;display:inline}
+#calpop .cp-res{font-weight:850;font-size:13px;color:var(--accent)}
+/* Ferien */
+.calleg{align-items:center}
+.ferbtn{margin-left:auto;border:1.5px solid #0e7490;color:#0e7490;background:none;border-radius:999px;padding:4px 11px;font-weight:800;font-size:12px;cursor:pointer}
+.ferbtn.on{background:#0e7490;color:#fff}
+.ferhint{font-size:12px;font-weight:600;color:#0e7490;background:color-mix(in srgb,#0e7490 10%,var(--card));border-radius:10px;padding:8px 10px;margin:0 0 10px}
+.cw.hol .cd{background:repeating-linear-gradient(135deg,color-mix(in srgb,#0891b2 14%,var(--soft)) 0 5px,var(--soft) 5px 10px)}
+.cw.hol .cw-kw small{color:#0e7490;font-weight:800}
+.cw-kw[data-a]{cursor:pointer}
+@media (prefers-color-scheme:dark){.ferbtn{border-color:#5fc4dc;color:#5fc4dc}.ferbtn.on{background:#5fc4dc;color:#0b2530}.ferhint{color:#5fc4dc}.cw.hol .cw-kw small{color:#5fc4dc}}
+/* Training absagen */
+.blk-opt{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cxbtn{margin-left:auto;border:1.5px solid #dc2626;color:#dc2626;background:none;border-radius:999px;padding:5px 12px;font-weight:800;font-size:12.5px;cursor:pointer}
+.cxbtn.on{background:#dc2626;color:#fff}
+.cxday .pd-h{cursor:default}
+.pd-x{width:22px;height:22px;border-radius:7px;background:#dc2626;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;flex:none}
+.wd .mt.cx{background:var(--mute)!important;text-decoration:line-through;opacity:.6}
+.ag.cx{opacity:.55}
+/* Testspiel-Termine kompakt */
+.qslot.cq{padding:10px 12px}
+.qslot.cq .sl-q{width:44px;height:44px;font-size:14px;border-radius:12px}
+.sl-free{border:1.5px solid var(--line);background:none;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--mute);cursor:pointer;flex:none}
+.sl-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}
+.sl-lv{border:1.5px solid var(--lc);color:var(--lc);background:none;border-radius:8px;padding:3px 8px;font-size:12px;font-weight:800;cursor:pointer}
+.sl-lv.on{background:var(--lc);color:#fff}
+@media (prefers-color-scheme:dark){.sl-lv{color:color-mix(in srgb,var(--lc) 50%,#fff);border-color:color-mix(in srgb,var(--lc) 60%,#fff)}.sl-lv.on{color:#fff}}
+.sl-ha{display:inline-flex;background:var(--soft);border-radius:9px;padding:2px}
+.sl-ha button{border:0;background:none;border-radius:7px;padding:4px 9px;font-size:12px;font-weight:700;color:var(--mute);cursor:pointer}
+.sl-ha button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.sl-time{border:1px solid var(--line);border-radius:9px;padding:4px 6px;font-size:13px;background:var(--card);width:88px}
+.sl-res{border:1.5px solid var(--line);background:none;border-radius:9px;padding:4px 9px;font-size:12px;font-weight:700;color:var(--mute);cursor:pointer}
+.sl-res.on{background:#15803d;border-color:#15803d;color:#fff}
+.sl-found{margin-top:9px}
