@@ -962,3 +962,42 @@ b.stp{color:var(--accent);font-weight:700}
 .checkwrap .iconbtn{padding:4px;flex:none}
 .checkwrap .iconbtn svg{width:17px;height:17px}
 .list.checks.one{display:block}.list.checks.one .checkwrap+.checkwrap{border-top:1px solid var(--line)}
+
+/* ───── Version 1.7 ───── */
+/* Spiele: höchstens 5 pro Reihe, etwas größere Kacheln */
+@media (min-width:560px){.gtiles{grid-template-columns:repeat(5,1fr);gap:8px}.gtile{min-height:104px;padding:10px 10px 9px}.gtile .go{font-size:13.5px}.gtile .gd{font-size:12px}}
+/* Saison-Zeitleiste: eine Farbe in Abstufungen, heute-Markierung */
+.tl-bar i{opacity:1}
+.tl-bar i.gone{filter:saturate(.75)}
+.tl-past{position:absolute;left:0;top:0;bottom:0;border-radius:8px 0 0 8px;background:repeating-linear-gradient(135deg,rgba(255,255,255,.28) 0 4px,transparent 4px 8px);pointer-events:none}
+.tl-now{background:#2b1d63;width:4px;top:-7px;bottom:-7px}
+.tl-key{background:#2b1d63}
+.tl-pillrow{position:relative;height:24px}
+.tl-pill{position:absolute;bottom:4px;transform:translateX(-50%);font-size:11px;font-weight:800;color:#fff;background:#2b1d63;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.tl-pill::after{content:'';position:absolute;left:50%;bottom:-4px;margin-left:-4px;border:4px solid transparent;border-bottom:0;border-top-color:#2b1d63}
+@media (prefers-color-scheme:dark){.tl-now,.tl-key,.tl-pill{background:#e9e3ff}.tl-pill{color:#2b1d63}.tl-pill::after{border-top-color:#e9e3ff}}
+/* Kalender: Training T und Spiel einheitlich, etwas kräftiger */
+.cm-t{background:#6d55cf;font-size:9px;padding:0 4px}
+.cm-g{background:#3f2a9a;width:14px;height:14px}
+.cm-g.qq{background:var(--card)}
+.cm-e{font-size:8.5px;font-weight:850;color:#fff;background:#c2410c;border-radius:4px;padding:0 3px;line-height:1.45}
+.calleg .cm-e{font-size:9px}
+@media (prefers-color-scheme:dark){.cm-t{background:#8b74e6}.cm-g{background:#c9bcff}}
+#calpop{position:fixed;z-index:60;background:var(--card);border-radius:14px;box-shadow:0 10px 30px rgba(20,10,50,.28);padding:10px 12px;border:1px solid var(--line)}
+.cp-h{font-size:12px;font-weight:800;color:var(--mute);margin-bottom:4px}
+.cp-r{display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer;border-top:1px solid var(--line)}
+.cp-r .grow{flex:1;min-width:0}
+.cp-r b{display:block;font-size:14px}
+.cp-r small{font-size:12px;color:var(--mute)}
+.cp-r.red b{color:#dc2626}
+.cp-res{font-weight:800;color:var(--ink)}
+.cp-w{margin-top:6px;font-size:13px}
+/* Trainingswoche: Hinzufügen-Feld, Events */
+.addbox{display:flex;align-items:center;gap:12px;width:100%;border:2px dashed var(--line);background:none;border-radius:14px;padding:12px 14px;margin:6px 0 10px;cursor:pointer;text-align:left;color:var(--accent)}
+.addbox span{display:flex;flex-direction:column}
+.addbox b{font-size:14.5px;color:var(--ink)}
+.addbox small{font-size:12px;color:var(--mute)}
+.evrow{display:flex;align-items:center;gap:10px}
+.evd{font-size:12px;font-weight:800;background:#c2410c;color:#fff;border-radius:7px;padding:2px 7px;white-space:nowrap}
+.xtag{font-size:11px;font-weight:800;background:var(--accentSoft);color:var(--accent);border-radius:999px;padding:2px 8px;vertical-align:2px}
+.wd .me{font-style:normal;font-size:8.5px;font-weight:800;color:#fff;background:#c2410c;border-radius:5px;padding:0 3px;line-height:1.5;max-width:42px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}

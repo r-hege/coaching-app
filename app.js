@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.6';
+const VERSION = '1.7';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -405,12 +405,12 @@ function gameLine(g) {
     ${g.ha ? `<span class="ha ${g.ha}">${g.ha}</span>` : ''}${icon('chev', 'chev')}</div>`;
 }
 function trainingLineShort(key) {
-  const w = weekData(key), days = setting().trainingDays || [2, 4, 5];
+  const w = weekData(key), days = weekDays(key);
   const ph = GP[w.phase];
   return (ph ? 'Schwerpunkt ' + ph.s + ' · ' : '') + days.map(d => WD[d].slice(0, 2)).join(', ');
 }
 function trainingSummary(key, compact) {
-  const w = weekData(key), mon = D.fromKey(key), days = setting().trainingDays || [2, 4, 5];
+  const w = weekData(key), mon = D.fromKey(key), days = weekDays(key);
   return days.map(d => {
     const dd = (w.days || {})[d] || {}, date = D.add(mon, d - 1), ph = phOf(key, d);
     const tops = (dd.topics || []).map(id => Store.data(id)?.title).filter(Boolean);
@@ -423,8 +423,12 @@ function trainingSummary(key, compact) {
 
 // ───────────────────────── Heute (Startseite) ─────────────────────────
 const dayIdx = s => ((D.parse(s).getDay() + 6) % 7) + 1; // Mo=1 … So=7
+// Trainingstage einer Woche: Standard-Tage aus den Einstellungen + Zusatztrainings dieser Woche
+const weekDays = key => [...new Set([...(setting().trainingDays || [2, 4, 5]), ...((weekData(key).extraDays) || [])])].sort((a, b) => a - b);
+const weekEvents = key => (weekData(key).events || []).slice().sort((a, b) => a.d - b.d);
+const eventsOn = date => weekEvents(D.week(date).key).filter(e => e.d === dayIdx(date));
 function trainingOn(date) {
-  if (!(setting().trainingDays || [2, 4, 5]).includes(dayIdx(date))) return null;
+  if (!weekDays(D.week(date).key).includes(dayIdx(date))) return null;
   const key = D.week(date).key, dd = ((weekData(key).days || {})[dayIdx(date)]) || {};
   return { date, key, wd: dayIdx(date), dd };
 }
@@ -454,6 +458,7 @@ function weekCal(t) {
     if (g) m += `<i class="mg ${outcome(g) ? 'o' + outcome(g) : ''}" title="${esc(g.opponent)}">${icon('spiele')}</i>`;
     if (q) m += `<i class="mq" title="Offener Testspieltermin">???</i>`;
     if (Store.all('game').some(x => x.alt === d && !x.cancelled)) m += `<i class="mq red" title="Spieltag evtl. Sonntag">?</i>`;
+    for (const e of eventsOn(d)) m += `<i class="me" title="${esc(e.title)}">${esc(e.title.slice(0, 6))}</i>`;
     if (tr) m += `<i class="mt" title="Training">${wph ? esc(wph.s) : 'T'}</i>`;
     if (!m) m = `<small class="wfree">${we ? 'spiel&shy;frei' : 'trai&shy;nings&shy;frei'}</small>`;
     h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}"><span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span><span class="wm">${m}</span></button>`;
@@ -565,11 +570,13 @@ function seasonTimeline(t) {
   const a = ps[0].start, b = ps[ps.length - 1].end, total = D.diff(a, b) + 1, pos = d => (D.diff(a, d) / total * 100);
   const now = t >= a && t <= b ? pos(t) : null;
   let segs = '', labels = '';
-  for (const p of ps) segs += `<i class="seg-${p.type}" style="left:${pos(p.start)}%;width:${(D.diff(p.start, p.end) + 1) / total * 100}%;background:${PHC[p.type]}" data-a="open" data-h="#/saison/phase/${p.id}" title="${esc(phaseName(p))}"></i>`;
+  for (const p of ps) segs += `<i class="seg-${p.type} ${p.end < t ? 'gone' : ''}" style="left:${pos(p.start)}%;width:${(D.diff(p.start, p.end) + 1) / total * 100}%;background:${TLC[p.type]}" data-a="open" data-h="#/saison/phase/${p.id}" title="${esc(phaseName(p))}"></i>`;
   for (const mk of ['HR', 'RR']) { const m = ps.filter(p => p.makro === mk); if (m.length) labels += `<span style="left:${pos(m[0].start)}%">${MAKRO[mk]}</span>`; }
-  return `<div class="card tline"><div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b>` : ''}</div><div class="tl-lab">${labels}</div>
-    <div class="legend">${[['vorb', 'Vorbereitung'], ['wettk', 'Wettkampf'], ['nachb', 'Nachbereitung']].map(([k, l]) => `<span><span class="dot" style="background:${PHC[k]};width:8px;height:8px"></span> ${l}</span>`).join('')}<span><b class="tl-key"></b> heute</span></div></div>`;
+  const pct = now != null ? Math.round(now) : null;
+  return `<div class="card tline">${now != null ? `<div class="tl-pillrow"><span class="tl-pill" style="left:${now}%">heute · ${pct}% der Saison</span></div>` : ''}<div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b><span class="tl-past" style="width:${now}%"></span>` : ''}</div><div class="tl-lab">${labels}</div>
+    <div class="legend">${[['vorb', 'Vorbereitung'], ['wettk', 'Wettkampf'], ['nachb', 'Nachbereitung']].map(([k, l]) => `<span><span class="dot" style="background:${TLC[k]};width:8px;height:8px"></span> ${l}</span>`).join('')}<span><b class="tl-key"></b> heute</span></div></div>`;
 }
+const TLC = { vorb: '#b7a6ee', nachb: '#9581dc', wettk: '#5a3fc0' };
 const phaseDone = p => { const m = tasksOf(p.id, 'meso'); return { n: m.filter(x => x.done).length, of: m.length, all: m.length > 0 && m.every(x => x.done) }; };
 function seasonHead(t, cur, nxt) {
   if (!cur) return nxt ? `<div class="shead pause"><div class="sh-eye">Saisonpause</div><div class="sh-title">${esc(nxt.label)} startet ${relDay(nxt.start)}</div><div class="sh-sub">${esc(phaseName(nxt))} · ${D.long(nxt.start)}</div></div>` : '';
@@ -590,13 +597,14 @@ function viewSaison(parts) {
   if (!phases().length) return { title: 'Saison', html: emptyState() };
   const sub = parts[0] === 'kalender' ? 'kalender' : 'zyklen';
   const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
-  let h = seasonHead(t, cur, nxt);
+  let h = seasonTimeline(t);
   h += `<div class="seg stick">${[['zyklen', 'Zyklen'], ['kalender', 'Kalender']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/saison/${v}">${l}</button>`).join('')}</div>`;
   if (sub === 'kalender') {
     h += calView();
     setTimeout(() => { const n = document.getElementById('cw-now'); if (n && !calView._done) { calView._done = true; n.scrollIntoView({ block: 'center' }); } }, 30);
     return { title: 'Saison', html: h };
   }
+  h += seasonHead(t, cur, nxt);
   if (cur) {
     // 1. Wochenaufgaben
     const wr = wtaskRows(cur, wk.key), wt = tasksOf(cur.id, 'mikro'), wdn = wt.filter(x => (weekData(wk.key).tasks || {})[x.id]).length;
@@ -614,7 +622,6 @@ function viewSaison(parts) {
     if (on.length) h += sec(`Bald: ${nxt.label} · ${relDay(nxt.start)}`, `<button class="link" data-a="open" data-h="#/saison/phase/${nxt.id}">Alle</button>`)
       + `<div class="card soon"><div class="list checks">${on.slice(0, 6).map(x => taskRow(x)).join('')}</div>${on.length > 6 ? `<div class="tiny mute" style="margin-top:6px">+ ${on.length - 6} weitere</div>` : ''}</div>`;
   }
-  h += sec('Saison im Überblick') + seasonTimeline(t);
   for (const mk of ['HR', 'RR']) {
     const ps = phases().filter(p => p.makro === mk); if (!ps.length) continue;
     h += sec(`${MAKRO[mk]}`, `<span class="tiny">${D.short(ps[0].start)} – ${D.full(ps[ps.length - 1].end)}</span>`);
@@ -632,23 +639,43 @@ function mesoCard(p, st) {
     <div class="prog"><i style="width:${pd.of ? Math.round(pd.n / pd.of * 100) : (done ? 100 : 0)}%"></i></div>
     <div class="tiny mute" style="margin-top:4px">${done ? 'Alles erledigt – abgehakt' : `${pd.n}/${pd.of} Aufgaben erledigt`}</div></div>${mark}</div>`;
 }
+function calPop(el) {
+  const d = el.dataset.d, key = D.week(d).key, old = $('#calpop'); if (old) old.remove();
+  const gs = Store.all('game').filter(g => g.date === d && !g.cancelled), q = slots().filter(x => x.date === d), alt = Store.all('game').filter(g => g.alt === d && !g.cancelled), ev = eventsOn(d), tr = trainingOn(d);
+  const row = (h, t, s, cls = '') => `<div class="cp-r ${cls}" ${h ? `data-a="open" data-h="${h}"` : ''}><div class="grow"><b>${t}</b>${s ? `<small>${s}</small>` : ''}</div>${h ? icon('chev', 'chev') : ''}</div>`;
+  let b = gs.map(g => row('#/spiele/' + encodeURIComponent(g.id), esc(g.opponent), [hasRes(g) ? `<span class="cp-res">${esc(resText(g))}</span>` : '', g.kickoff ? esc(g.kickoff) + ' Uhr' : '', g.type ? esc(g.type) : '', g.ha === 'H' ? 'Heim' : g.ha === 'A' ? 'Auswärts' : ''].filter(Boolean).join(' · '))).join('');
+  b += q.map(() => row('#/tests/termine', '??? Testspielgegner gesucht', 'offener Termin', 'red')).join('');
+  b += alt.map(g => row('#/spiele/' + encodeURIComponent(g.id), '? ' + esc(g.opponent), 'Spieltag evtl. an diesem Sonntag', 'red')).join('');
+  b += ev.map(e => row('', esc(e.title), 'Event')).join('');
+  if (tr) b += row('#/training/woche/' + key, 'Training', '');
+  const p = document.createElement('div'); p.id = 'calpop';
+  p.innerHTML = `<div class="cp-h">${D.long(d)}</div>${b}<button class="link cp-w" data-a="open" data-h="#/training/woche/${key}">Woche planen ›</button>`;
+  p.dataset.y = scrollY; document.body.appendChild(p);
+  const r = el.getBoundingClientRect(), w = Math.min(280, innerWidth - 20);
+  p.style.width = w + 'px'; p.style.left = Math.max(10, Math.min(innerWidth - w - 10, r.left + r.width / 2 - w / 2)) + 'px';
+  const below = r.bottom + 6 + p.offsetHeight < innerHeight - 70; p.style.top = (below ? r.bottom + 6 : r.top - p.offsetHeight - 6) + 'px';
+}
+document.addEventListener('click', e => { const p = $('#calpop'); if (p && !e.target.closest('#calpop') && !e.target.closest('[data-a=calPop]')) p.remove(); if (p && e.target.closest('#calpop [data-a=open]')) setTimeout(() => p.remove(), 0); }, true);
+window.addEventListener('scroll', () => { const p = $('#calpop'); if (p && Math.abs(scrollY - (+p.dataset.y || 0)) > 40) p.remove(); }, { passive: true });
+document.addEventListener('mouseover', e => { if (!matchMedia('(hover:hover)').matches) return; const c = e.target.closest && e.target.closest('.cd[data-a=calPop]'); if (c && c !== calPop._last) { calPop._last = c; calPop(c); } else if (!c && !(e.target.closest && e.target.closest('#calpop'))) { calPop._last = null; } });
 // Kalender: alle Wochen der Saison untereinander, Mo–So wie in der Kabine
 function calView() {
-  const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots(), days = setting().trainingDays || [2, 4, 5];
+  const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots();
   const games = Store.all('game').filter(g => !g.cancelled), alts = new Set(games.map(g => g.alt).filter(Boolean));
-  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span></div><div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
+  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-e">E</i> Event</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span></div><div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
   while (m <= ps[ps.length - 1].end) {
-    const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6));
+    const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6)), days = weekDays(w.key), evs = weekEvents(w.key);
     if (p && p !== lastP && (!lastP || p.id !== lastP.id)) { h += `<div class="cal-ph" style="--pc:${PHC[p.type]}"><b>${esc(p.label)}</b> ${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</div>`; lastP = p; }
     let cells = '';
     for (let i = 0; i < 7; i++) {
-      const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p, alt = alts.has(d);
-      let mk = gs.map(g => { const o = outcome(g), open = /offen|\?\?\?/i.test(g.opponent || ''); return `<i class="cm-g ${o ? 'o' + o : ''} ${open ? 'qq' : ''}" title="${esc(g.opponent)}">${open ? '?' : ''}</i>`; }).join('');
-      if (q.length) mk += `<i class="cm-q" title="Offener Testspieltermin">???</i>`;
-      if (alt) mk += `<i class="cm-q" title="Spieltag evtl. Sonntag">?</i>`;
-      if (tr) mk += `<i class="cm-t" style="${wph ? `--c:${wph.c}` : ''}">${wph ? esc(wph.s) : 'T'}</i>`;
-      const href = gs.length ? '#/spiele/' + encodeURIComponent(gs[0].id) : q.length ? '#/tests/termine' : '#/training/woche/' + w.key;
-      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''}" data-a="open" data-h="${href}"><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
+      const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p, alt = alts.has(d), ev = evs.filter(e => e.d === i + 1);
+      let mk = gs.map(g => { const open = /offen|\?\?\?/i.test(g.opponent || ''); return `<i class="cm-g ${open ? 'qq' : ''}">${open ? '?' : ''}</i>`; }).join('');
+      if (q.length) mk += `<i class="cm-q">???</i>`;
+      if (alt) mk += `<i class="cm-q">?</i>`;
+      if (tr) mk += `<i class="cm-t">T</i>`;
+      if (ev.length) mk += `<i class="cm-e">E</i>`;
+      const pop = gs.length || q.length || alt || ev.length;
+      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''}" ${pop ? `data-a="calPop" data-d="${d}"` : `data-a="open" data-h="#/training/woche/${w.key}"`}><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
     }
     h += `<div class="cw ${w.key === curKey ? 'now' : ''} ${D.add(m, 6) < t ? 'pastw' : ''}" ${w.key === curKey ? 'id="cw-now"' : ''}>
       <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'kein Schwerpunkt'}"><b>KW ${w.week}</b><small>${D.short(m)}</small></div>
@@ -1305,7 +1332,7 @@ function periodView() {
     h += `<div class="card list pweeks">`;
     for (const w of ws) {
       const ph = GP[weekData(w.key).phase], games = weekGames(w.key), wdd = weekData(w.key).days || {}, qs = slots().filter(x => x.date >= w.monday && x.date <= D.add(w.monday, 6));
-      const sq = (setting().trainingDays || [2, 4, 5]).map(d => { const date = D.add(w.monday, d - 1), r = RATE[(wdd[d] || {}).rating];
+      const sq = weekDays(w.key).map(d => { const date = D.add(w.monday, d - 1), r = RATE[(wdd[d] || {}).rating];
         return `<i class="pw-sq ${r ? 'r' : date < D.today() ? 'past' : ''}" style="${r ? `--rc:${r.c}` : ''}" title="${WD[d]} ${D.short(date)}${r ? ' · Bewertung ' + wdd[d].rating + '/5' : ''}">${WD[d].slice(0, 2)}</i>`; }).join('');
       h += `<div class="pw ${w.key === curKey ? 'now' : ''}" ${w.key === curKey ? 'id="pw-now"' : ''}>
         <button class="pw-ph ${ph ? 'set' : ''}" style="--c:${ph ? ph.c : 'var(--line)'}" data-a="phasePick" data-week="${w.key}" aria-label="Schwerpunkt wählen">${ph ? esc(ph.s) : '+'}</button>
@@ -1362,7 +1389,7 @@ function rateRow(key, d, dd) {
   return `<div class="rate"><span>Wie war das Training?</span>${[1, 2, 3, 4, 5].map(n => `<button class="${dd.rating === n ? 'on' : ''}" style="--rc:${RATE[n].c}" data-a="rate" data-week="${key}" data-day="${d}" data-v="${n}" aria-label="${n} von 5 – ${RATE[n].l}">${n}</button>`).join('')}</div>`;
 }
 function trainingWeek(key) {
-  const mon = D.fromKey(key), p = phaseAt(mon) || phaseAt(D.add(mon, 6)), w = weekData(key), days = setting().trainingDays || [2, 4, 5];
+  const mon = D.fromKey(key), p = phaseAt(mon) || phaseAt(D.add(mon, 6)), w = weekData(key), days = weekDays(key), extra = w.extraDays || [];
   const prev = D.week(D.add(mon, -7)).key, next = D.week(D.add(mon, 7)).key, wp = GP[w.phase];
   let h = `<div class="weekhead"><div class="wh-nav"><button class="iconbtn" data-a="open" data-h="#/training/woche/${prev}" aria-label="Vorherige Woche">${icon('left')}</button>
     <div class="grow"><div class="wh-kw">KW ${D.week(mon).week} <span class="wh-dates">${D.short(mon)}–${D.short(D.add(mon, 6))}</span></div><div class="wh-sub">${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div></div>
@@ -1386,7 +1413,7 @@ function trainingWeek(key) {
     const aths = (dd.athletics || []).map(id => Store.get(id)).filter(Boolean);
     const games = gamesBetween(date, date);
     const isToday = date === D.today();
-    h += `<div class="card day ${isToday ? 'today' : ''}" style="--dc:${ph ? ph.c : 'var(--line)'}"><h3><span class="grow">${WD[d]} ${D.short(date)}${isToday ? ' <span class="todaytag">heute</span>' : ''}</span></h3>
+    h += `<div class="card day ${isToday ? 'today' : ''}" style="--dc:${ph ? ph.c : 'var(--line)'}"><h3><span class="grow">${WD[d]} ${D.short(date)}${isToday ? ' <span class="todaytag">heute</span>' : ''}${extra.includes(d) && !(setting().trainingDays || [2, 4, 5]).includes(d) ? ' <span class="xtag">Zusatztraining</span>' : ''}</span>${extra.includes(d) && !(setting().trainingDays || [2, 4, 5]).includes(d) ? `<button class="link sm" data-a="xDayDel" data-week="${key}" data-day="${d}">entfernen</button>` : ''}</h3>
       ${games.map(g => `<div class="gamelink" data-a="open" data-h="#/spiele/${encodeURIComponent(g.id)}">${icon('spiele', 'mini')} Spiel: <b>${esc(g.opponent)}</b>${g.kickoff ? ' · ' + esc(g.kickoff) : ''}${icon('chev', 'chev')}</div>`).join('')}
       ${'' + `
       <div class="sub"><span class="grow">Schwerpunkte</span><button class="link" data-a="pickDay" data-what="topics" data-week="${key}" data-day="${d}">+ wählen</button></div>
@@ -1396,7 +1423,10 @@ function trainingWeek(key) {
       ${date <= D.today() ? rateRow(key, d, dd) : ''}${date < D.today() ? `<button class="link" data-a="togglePast" data-k="${key}${d}" style="margin-top:6px">Einklappen</button>` : ''}</div>`;
   }
   if (past) h += sec('Schon vorbei') + `<div class="card pastlist">${past}</div>`;
-  h += `<div class="tiny mute" style="margin:4px">Trainingstage änderst du über das Wappen oben rechts → Einstellungen.</div>`;
+  const evs = weekEvents(key);
+  if (evs.length) h += sec('Events dieser Woche') + `<div class="card list">${evs.map(e => `<div class="li evrow"><span class="evd">${WD[e.d].slice(0, 2)} ${D.short(D.add(mon, e.d - 1))}</span><div class="grow t">${esc(e.title)}</div><button class="iconbtn" data-a="evDel" data-week="${key}" data-id="${esc(e.id)}" aria-label="Löschen">${icon('trash')}</button></div>`).join('')}</div>`;
+  h += `<button class="addbox" data-a="weekAdd" data-week="${key}">${icon('plus')}<span><b>Trainingstag oder Event hinzufügen</b><small>Tag dieser Woche wählen</small></span></button>`;
+  h += `<div class="tiny mute" style="margin:4px">Feste Trainingstage änderst du über das Wappen oben rechts → Einstellungen.</div>`;
   return h;
 }
 const exName = e => e.name + (e.variant ? ' ' + e.variant : '');
@@ -1995,6 +2025,23 @@ const A = {
   tab: el => { const k = el.dataset.k; if (route().tab === k) { go('#/' + k); window.scrollTo({ top: 0, behavior: 'smooth' }); } else go(LAST[k] || '#/' + k); },
   open: el => go(el.dataset.h),
   todoSheet: () => todoSheet(),
+  weekAdd: el => {
+    const key = el.dataset.week, mon = D.fromKey(key);
+    openForm({ title: 'Hinzufügen', value: { typ: 'event', d: '' },
+      fields: [{ k: 'typ', l: 'Was?', t: 'seg', opts: [['event', 'Event'], ['training', 'Trainingstag']] },
+        { k: 'd', l: 'Tag', t: 'seg', opts: [1, 2, 3, 4, 5, 6, 7].map(d => [String(d), `${WD[d].slice(0, 2)} ${D.parse(D.add(mon, d - 1)).getDate()}.`]) },
+        { k: 'title', l: 'Name (nur bei Event)', t: 'text', ph: 'z. B. Teamabend, Fotoshooting, Elternabend' }],
+      onSave: async v => {
+        const d = +v.d; if (!d) return toast('Bitte einen Tag wählen');
+        const w = { ...weekData(key) };
+        if (v.typ === 'training') { if (weekDays(key).includes(d)) return toast('An dem Tag ist schon Training'); w.extraDays = [...(w.extraDays || []), d]; }
+        else { if (!v.title) return toast('Bitte einen Namen eingeben'); w.events = [...(w.events || []), { id: uid('ev'), d, title: v.title }]; }
+        Store.put('week:' + key, 'week', w); await Sheet.close(); toast('Hinzugefügt'); render();
+      } });
+  },
+  evDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.events = (w.events || []).filter(e => e.id !== el.dataset.id); Store.put('week:' + k, 'week', w); render(); },
+  xDayDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.extraDays = (w.extraDays || []).filter(d => d !== +el.dataset.day); Store.put('week:' + k, 'week', w); render(); },
+  calPop: (el, e) => calPop(el),
   newGoal: () => goalForm({ area: UI.ziele || 'training', sub: UI.ziele === 'ideen' ? 'Multisportiv' : '' }, true),
   editGoal: el => { const g = Store.get(el.dataset.id); if (g) goalForm(g); },
   ideaDone: el => { const g = Store.data(el.dataset.id); if (!g) return; Store.put(el.dataset.id, 'goal', { ...g, done: !g.done, doneAt: !g.done ? D.today() : '' }); if (!g.done) toast('Gemacht ✓'); render(); },
