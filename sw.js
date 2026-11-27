@@ -1,6 +1,6 @@
 // Offline-Cache für die App-Hülle. Daten kommen aus der Datenbank bzw. dem lokalen Speicher.
-const CACHE = 'coaching-v8';
-const SHELL = ['./', 'index.html', 'styles.css?v=8', 'app.js?v=8', 'config.js?v=1', 'vendor/supabase.js',
+const CACHE = 'coaching-v9';
+const SHELL = ['./', 'index.html', 'styles.css?v=9', 'app.js?v=9', 'config.js?v=1', 'vendor/supabase.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/wappen.png'];
 
 self.addEventListener('install', e => {

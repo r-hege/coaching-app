@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.5';
+const VERSION = '1.6';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -260,6 +260,7 @@ function render() {
   const r = route(), sameRoute = lastHash === location.hash, y = window.scrollY;
   lastHash = location.hash;
   if (!location.hash.includes('periodisierung')) periodView._done = false;
+  if (!location.hash.includes('kalender')) calView._done = false;
   $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-k="${t.k}" class="${t.k === r.tab ? 'on' : ''}">${icon(t.k)}<span>${t.l}</span></button>`).join('');
   let out;
   try { out = (VIEWS[r.tab] || VIEWS.heute)(r.parts); }
@@ -342,9 +343,9 @@ function field(f, v) {
       return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="fitgrid" data-fit="${f.k}" data-val='${esc(JSON.stringify(fit))}'>${b}</div>
         <div class="hint">Antippen wechselt: – → Möglich → Gut → Ideal</div></div>`; }
     case 'posv': { const pv = val || {}; let grp = null, b = '';
-      for (const P of POSV) { if (P.g !== grp) { b += `<div class="pvg">${P.g}</div>`; grp = P.g; } const l = pv[P.k] || 0; b += `<button type="button" class="${l ? 'l' + l : ''}" data-a="posvCycle" data-p="${P.k}" title="${esc(P.f)}"><b>${P.l}</b><span>${l ? POSVLV[l] : '–'}</span></button>`; }
-      return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="posgrid pv" data-posv="${f.k}" data-val='${esc(JSON.stringify(pv))}'>${b}</div>
-        <div class="hint">Antippen wechselt: – → Stamm → in Frage → –. „In Frage“ zählt eine Stufe tiefer.</div></div>`; }
+      for (const P of POSV) { if (P.g !== grp) { b += `<div class="pvg">${P.g}</div>`; grp = P.g; } const l = pv[P.k] || 0; b += `<button type="button" class="${l ? 'l' + l : ''}" data-a="posvCycle" data-p="${P.k}" title="${esc(P.f)}"><i class="pstar ${f.best === P.k ? 'on' : ''}" data-a="posvStar" data-p="${P.k}" title="Beste Position">★</i><b>${P.l}</b><span>${l ? POSVLV[l] : '–'}</span></button>`; }
+      return `<div class="f"><div class="lab">${esc(f.l)}</div><div class="posgrid pv" data-posv="${f.k}" data-val='${esc(JSON.stringify(pv))}' data-best="${esc(f.best || '')}">${b}</div>
+        <div class="hint">Antippen wechselt: – → Stamm → in Frage → –. „In Frage“ zählt eine Stufe tiefer. ★ = beste Position (bestimmt die Spalte im Kader).</div></div>`; }
     case 'html': return f.html;
     default: return `<div class="f">${lab}<input id="${id}" type="text" name="${f.k}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.auto ? 'autofocus' : ''}>${hint}</div>`;
   }
@@ -370,7 +371,7 @@ function readForm() {
     else if (f.t === 'chips' || f.t === 'multi') out[f.k] = $$(`[name="${f.k}"]:checked`, el).map(i => i.value);
     else if (f.t === 'seg') out[f.k] = $(`[name="${f.k}"]:checked`, el)?.value ?? '';
     else if (f.t === 'fit') out[f.k] = JSON.parse($(`[data-fit="${f.k}"]`, el).dataset.val);
-    else if (f.t === 'posv') out[f.k] = JSON.parse($(`[data-posv="${f.k}"]`, el).dataset.val);
+    else if (f.t === 'posv') { const g = $(`[data-posv="${f.k}"]`, el); out[f.k] = JSON.parse(g.dataset.val); out.best = out[f.k][g.dataset.best] ? g.dataset.best : ''; }
     else if (f.t === 'html') continue;
     else { const i = $(`[name="${f.k}"]`, el); if (i) out[f.k] = f.t === 'number' ? (i.value === '' ? '' : +i.value) : i.value.trim(); }
   }
@@ -452,6 +453,7 @@ function weekCal(t) {
     let m = '';
     if (g) m += `<i class="mg ${outcome(g) ? 'o' + outcome(g) : ''}" title="${esc(g.opponent)}">${icon('spiele')}</i>`;
     if (q) m += `<i class="mq" title="Offener Testspieltermin">???</i>`;
+    if (Store.all('game').some(x => x.alt === d && !x.cancelled)) m += `<i class="mq red" title="Spieltag evtl. Sonntag">?</i>`;
     if (tr) m += `<i class="mt" title="Training">${wph ? esc(wph.s) : 'T'}</i>`;
     if (!m) m = `<small class="wfree">${we ? 'spiel&shy;frei' : 'trai&shy;nings&shy;frei'}</small>`;
     h += `<button class="wd ${d === t ? 'now' : ''} ${d < t ? 'past' : ''}" data-a="open" data-h="${href}"><span class="wn">${D.wd(d)}</span><span class="wdt">${D.parse(d).getDate()}</span><span class="wm">${m}</span></button>`;
@@ -512,9 +514,9 @@ function todoData() {
   if (noNum.length) { n++; todo += todoRow('kader', `${cap(noNum.length, 'Spieler', 'Spieler')} ohne Rückennummer`, esc(noNum.map(p => p.short || p.name).join(', ')), `data-a="open" data-h="#/kader/liste"`); }
   if (cur) {
     const wt = tasksOf(cur.id, 'mikro'), wdn = weekData(wk.key).tasks || {}, openW = wt.filter(x => !wdn[x.id]);
-    if (openW.length) todo += `<div class="todo-sub">Jede Woche</div><div class="list checks">${openW.map(x => check(false, x.title, `data-a="wtask" data-id="${esc(x.id)}" data-week="${wk.key}"`)).join('')}</div>`;
+    if (openW.length) todo += `<div class="todo-sub">Wochenaufgaben</div><div class="list checks">${openW.map(x => check(false, x.title, `data-a="wtask" data-id="${esc(x.id)}" data-week="${wk.key}"`)).join('')}</div>`;
     const om = tasksOf(cur.id, 'meso').filter(x => !x.done);
-    if (om.length) todo += `<div class="todo-sub"><span class="grow">${esc(cur.label)} · noch ${om.length} offen</span><button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">Alle</button></div><div class="list checks">${om.slice(0, 3).map(x => taskRow(x)).join('')}</div>`;
+    if (om.length) todo += `<div class="todo-sub"><span class="grow">Zyklusaufgaben · ${esc(cur.label)} · ${om.length} offen</span><button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">Alle</button></div><div class="list checks">${om.slice(0, 3).map(x => taskRow(x)).join('')}</div>`;
     n += openW.length + om.length;
   }
   if (nxt && D.diff(t, nxt.start) <= 14) {
@@ -568,39 +570,93 @@ function seasonTimeline(t) {
   return `<div class="card tline"><div class="tl-bar">${segs}${now != null ? `<b class="tl-now" style="left:${now}%"></b>` : ''}</div><div class="tl-lab">${labels}</div>
     <div class="legend">${[['vorb', 'Vorbereitung'], ['wettk', 'Wettkampf'], ['nachb', 'Nachbereitung']].map(([k, l]) => `<span><span class="dot" style="background:${PHC[k]};width:8px;height:8px"></span> ${l}</span>`).join('')}<span><b class="tl-key"></b> heute</span></div></div>`;
 }
+const phaseDone = p => { const m = tasksOf(p.id, 'meso'); return { n: m.filter(x => x.done).length, of: m.length, all: m.length > 0 && m.every(x => x.done) }; };
+function seasonHead(t, cur, nxt) {
+  if (!cur) return nxt ? `<div class="shead pause"><div class="sh-eye">Saisonpause</div><div class="sh-title">${esc(nxt.label)} startet ${relDay(nxt.start)}</div><div class="sh-sub">${esc(phaseName(nxt))} · ${D.long(nxt.start)}</div></div>` : '';
+  const weeks = weeksOf(cur), idx = weeks.findIndex(w => w.key === D.week(t).key), pd = phaseDone(cur);
+  return `<div class="shead ${cur.type === 'wettk' ? 'hot' : ''}" data-a="open" data-h="#/saison/phase/${cur.id}">
+    <div class="sh-top"><div class="grow"><div class="sh-eye">${MAKRO[cur.makro]}</div><div class="sh-title">${esc(cur.label)}</div></div>
+      <div class="sh-wk"><b>${idx + 1}</b><span>/ ${weeks.length} Wo.</span></div></div>
+    <div class="sh-weeks">${weeks.map((w, i) => `<i class="${i < idx ? 'done' : i === idx ? 'now' : ''}" title="KW ${w.week}"></i>`).join('')}</div>
+    <div class="sh-foot"><span>${D.short(cur.start)}–${D.short(cur.end)} · ${pd.n}/${pd.of} Zyklusaufgaben</span>${nxt ? `<span>danach ${esc(nxt.label)} ${relDay(nxt.start)}</span>` : ''}</div></div>`;
+}
+function wtaskRows(p, key) {
+  const tasks = tasksOf(p.id, 'mikro'), done = weekData(key).tasks || {};
+  return tasks.map(t => `<div class="checkwrap">${check(!!done[t.id], t.title, `data-a="wtask" data-id="${esc(t.id)}" data-week="${key}"`)}<button class="iconbtn" data-a="editPtask" data-id="${esc(t.id)}" aria-label="Bearbeiten">${icon('edit')}</button></div>`).join('');
+}
 function viewSaison(parts) {
   if (parts[0] === 'phase') return viewPhase(parts[1]);
   if (parts[0] === 'woche') return viewWeek(parts[1]);
   if (!phases().length) return { title: 'Saison', html: emptyState() };
+  const sub = parts[0] === 'kalender' ? 'kalender' : 'zyklen';
   const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
-  let h = seasonTimeline(t);
-  if (cur) {
-    const weeks = weeksOf(cur), idx = weeks.findIndex(w => w.key === wk.key);
-    const meso = tasksOf(cur.id, 'meso'), done = meso.filter(x => x.done).length;
-    h += `<div class="phasecard" style="--pc:${PHC[cur.type]}" data-a="open" data-h="#/saison/phase/${cur.id}">
-      <div class="pc-eye">Jetzt · ${MAKRO[cur.makro]}</div><div class="pc-title">${esc(cur.label)}</div>
-      <div class="pc-sub">Woche ${idx + 1} von ${weeks.length} · ${D.short(cur.start)}–${D.short(cur.end)}</div>
-      <div class="pc-weeks">${weeks.map((w, i) => `<i class="${i < idx ? 'done' : i === idx ? 'now' : ''}"></i>`).join('')}</div>
-      <div class="pc-foot"><span>${done}/${meso.length} Aufgaben erledigt</span>${nxt ? `<span>danach ${esc(nxt.label)} ${relDay(nxt.start)}</span>` : ''}</div></div>`;
-    const open = meso.filter(x => !x.done);
-    h += sec(`Aufgaben · ${cur.label}`, `<button class="link" data-a="addPtask" data-phase="${cur.id}" data-mode="meso">+ Aufgabe</button>`);
-    h += `<div class="card">${open.length ? `<div class="list checks">${open.slice(0, 8).map(x => taskRow(x)).join('')}</div>${open.length > 8 ? `<button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">+ ${open.length - 8} weitere ansehen</button>` : ''}` : '<div class="mute small">Alles erledigt 🎉</div>'}</div>`;
-    h += sec(`Jede Woche · KW ${wk.week}`, `<button class="link" data-a="open" data-h="#/saison/woche/${wk.key}">Woche öffnen</button>`);
-    h += `<div class="card">${weekTaskRows(cur, wk.key)}</div>`;
-  } else if (nxt) {
-    h += `<div class="phasecard" style="--pc:#64748b"><div class="pc-eye">Pause</div><div class="pc-title">Saisonpause</div><div class="pc-sub">${esc(phaseName(nxt))} startet ${D.long(nxt.start)} · ${relDay(nxt.start)}</div></div>`;
+  let h = seasonHead(t, cur, nxt);
+  h += `<div class="seg stick">${[['zyklen', 'Zyklen'], ['kalender', 'Kalender']].map(([v, l]) => `<button class="${sub === v ? 'on' : ''}" data-a="open" data-h="#/saison/${v}">${l}</button>`).join('')}</div>`;
+  if (sub === 'kalender') {
+    h += calView();
+    setTimeout(() => { const n = document.getElementById('cw-now'); if (n && !calView._done) { calView._done = true; n.scrollIntoView({ block: 'center' }); } }, 30);
+    return { title: 'Saison', html: h };
   }
+  if (cur) {
+    // 1. Wochenaufgaben
+    const wr = wtaskRows(cur, wk.key), wt = tasksOf(cur.id, 'mikro'), wdn = wt.filter(x => (weekData(wk.key).tasks || {})[x.id]).length;
+    h += sec(`Wochenaufgaben · KW ${wk.week}`, `${wt.length ? `<span class="tiny">${wdn}/${wt.length}</span> ` : ''}<button class="link" data-a="addPtask" data-phase="${cur.id}" data-mode="mikro">+ Aufgabe</button>`);
+    h += `<div class="card">${wr ? `<div class="list checks one">${wr}</div>` : '<div class="mute small">Keine Wochenaufgaben in dieser Phase. Mit „+ Aufgabe“ anlegen.</div>'}</div>`;
+    // 2. Zyklusaufgaben
+    const meso = tasksOf(cur.id, 'meso'), open = meso.filter(x => !x.done);
+    h += sec(`Zyklusaufgaben · ${cur.label}`, `<span class="tiny">${meso.length - open.length}/${meso.length}</span> <button class="link" data-a="addPtask" data-phase="${cur.id}" data-mode="meso">+ Aufgabe</button>`);
+    h += `<div class="card">${open.length ? `<div class="list checks one">${open.slice(0, 8).map(x => taskRow(x, { edit: true })).join('')}</div>${open.length > 8 ? `<button class="link" data-a="open" data-h="#/saison/phase/${cur.id}">+ ${open.length - 8} weitere ansehen</button>` : ''}`
+      : `<div class="alldone"><span>✓</span><div><b>Alle Zyklusaufgaben erledigt</b><small>Hier ist nichts mehr offen.</small></div></div>`}</div>`;
+  }
+  // 3. Bald
   if (nxt && D.diff(t, nxt.start) <= 21) {
     const on = tasksOf(nxt.id, 'meso').filter(x => !x.done);
     if (on.length) h += sec(`Bald: ${nxt.label} · ${relDay(nxt.start)}`, `<button class="link" data-a="open" data-h="#/saison/phase/${nxt.id}">Alle</button>`)
       + `<div class="card soon"><div class="list checks">${on.slice(0, 6).map(x => taskRow(x)).join('')}</div>${on.length > 6 ? `<div class="tiny mute" style="margin-top:6px">+ ${on.length - 6} weitere</div>` : ''}</div>`;
   }
+  h += sec('Saison im Überblick') + seasonTimeline(t);
   for (const mk of ['HR', 'RR']) {
     const ps = phases().filter(p => p.makro === mk); if (!ps.length) continue;
     h += sec(`${MAKRO[mk]}`, `<span class="tiny">${D.short(ps[0].start)} – ${D.full(ps[ps.length - 1].end)}</span>`);
-    h += `<div class="card list mesolist">${ps.map(p => mesoCard(p, cur && cur.id === p.id)).join('')}</div>`;
+    h += `<div class="mesolist2">${ps.map(p => mesoCard(p, p.end < t ? 'past' : p.start > t ? 'future' : 'now')).join('')}</div>`;
   }
   return { title: 'Saison', html: h };
+}
+function mesoCard(p, st) {
+  const pd = phaseDone(p), weeks = weeksOf(p), nGames = gamesBetween(p.start, p.end).filter(g => !g.cancelled).length;
+  const done = pd.all || (st === 'past' && !pd.of);
+  const mark = done ? `<span class="mc-ok" title="Alles erledigt">✓</span>` : st === 'past' && pd.of - pd.n ? `<span class="mc-open">${pd.of - pd.n} offen</span>` : '';
+  return `<div class="mcard ${st} ${done ? 'done' : ''}" style="--pc:${PHC[p.type]}" data-a="open" data-h="#/saison/phase/${p.id}">
+    <span class="stripe"></span><div class="mc-in"><div class="mc-h"><b>${esc(p.label)}</b>${st === 'now' ? '<span class="mc-now">läuft</span>' : ''}</div>
+    <div class="small mute">${D.short(p.start)} – ${D.short(p.end)} · ${cap(weeks.length, 'Woche', 'Wochen')} · ${cap(nGames, 'Spiel', 'Spiele')}</div>
+    <div class="prog"><i style="width:${pd.of ? Math.round(pd.n / pd.of * 100) : (done ? 100 : 0)}%"></i></div>
+    <div class="tiny mute" style="margin-top:4px">${done ? 'Alles erledigt – abgehakt' : `${pd.n}/${pd.of} Aufgaben erledigt`}</div></div>${mark}</div>`;
+}
+// Kalender: alle Wochen der Saison untereinander, Mo–So wie in der Kabine
+function calView() {
+  const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots(), days = setting().trainingDays || [2, 4, 5];
+  const games = Store.all('game').filter(g => !g.cancelled), alts = new Set(games.map(g => g.alt).filter(Boolean));
+  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span></div><div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
+  while (m <= ps[ps.length - 1].end) {
+    const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6));
+    if (p && p !== lastP && (!lastP || p.id !== lastP.id)) { h += `<div class="cal-ph" style="--pc:${PHC[p.type]}"><b>${esc(p.label)}</b> ${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</div>`; lastP = p; }
+    let cells = '';
+    for (let i = 0; i < 7; i++) {
+      const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p, alt = alts.has(d);
+      let mk = gs.map(g => { const o = outcome(g), open = /offen|\?\?\?/i.test(g.opponent || ''); return `<i class="cm-g ${o ? 'o' + o : ''} ${open ? 'qq' : ''}" title="${esc(g.opponent)}">${open ? '?' : ''}</i>`; }).join('');
+      if (q.length) mk += `<i class="cm-q" title="Offener Testspieltermin">???</i>`;
+      if (alt) mk += `<i class="cm-q" title="Spieltag evtl. Sonntag">?</i>`;
+      if (tr) mk += `<i class="cm-t" style="${wph ? `--c:${wph.c}` : ''}">${wph ? esc(wph.s) : 'T'}</i>`;
+      const href = gs.length ? '#/spiele/' + encodeURIComponent(gs[0].id) : q.length ? '#/tests/termine' : '#/training/woche/' + w.key;
+      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''}" data-a="open" data-h="${href}"><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
+    }
+    h += `<div class="cw ${w.key === curKey ? 'now' : ''} ${D.add(m, 6) < t ? 'pastw' : ''}" ${w.key === curKey ? 'id="cw-now"' : ''}>
+      <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'kein Schwerpunkt'}"><b>KW ${w.week}</b><small>${D.short(m)}</small></div>
+      <div class="cw-days">${cells}</div>
+      <button class="cw-plan" data-a="open" data-h="#/training/woche/${w.key}" aria-label="Woche planen" title="Woche planen">${icon('edit')}</button></div>`;
+    m = D.add(m, 7);
+  }
+  return h + `</div>`;
 }
 
 function phaseAlert(p, title, intro) {
@@ -610,26 +666,16 @@ function phaseAlert(p, title, intro) {
     <div class="list checks">${open.slice(0, 6).map(x => taskRow(x)).join('')}</div>
     ${open.length > 6 ? `<button class="link" data-a="open" data-h="#/saison/phase/${p.id}">Alle ${open.length} Aufgaben ansehen</button>` : ''}</div>`;
 }
-function mesoCard(p, now) {
-  const tasks = tasksOf(p.id, 'meso'), done = tasks.filter(t => t.done).length, weeks = weeksOf(p);
-  const nGames = gamesBetween(p.start, p.end).length;
-  return `<div class="meso tap ${now ? 'now' : ''}" data-a="open" data-h="#/saison/phase/${p.id}">
-    <span class="stripe" style="background:${PHC[p.type]}"></span><div class="grow" style="flex:1;min-width:0">
-    <div class="row"><b class="grow">${esc(p.label)}</b>${now ? badge('jetzt', 'var(--accent)') : ''}</div>
-    <div class="small mute">${D.short(p.start)} – ${D.short(p.end)} · ${cap(weeks.length, 'Woche', 'Wochen')} · ${cap(nGames, 'Spiel', 'Spiele')}</div>
-    <div class="prog"><i style="width:${tasks.length ? Math.round(done / tasks.length * 100) : 0}%"></i></div>
-    <div class="tiny mute" style="margin-top:4px">${done}/${tasks.length} Aufgaben erledigt</div></div>${icon('chev', 'chev')}</div>`;
-}
 function viewPhase(pid) {
   const p = Store.get(pid); if (!p) return notFound();
   const t = D.today(), curKey = D.week(t).key;
   const meso = tasksOf(p.id, 'meso'), mikro = tasksOf(p.id, 'mikro');
   let h = `<div class="phasecard" style="--pc:${PHC[p.type]}"><div class="pc-eye">${MAKRO[p.makro]} · Mesozyklus</div>
     <div class="pc-title">${esc(p.label)}</div><div class="pc-sub">${D.long(p.start)} – ${D.long(p.end)} · KW ${D.week(p.start).week}–${D.week(p.end).week}</div></div>`;
-  h += sec(`Aufgaben dieser Phase (${meso.filter(x => x.done).length}/${meso.length})`, `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button>`);
+  h += sec(`Zyklusaufgaben (${meso.filter(x => x.done).length}/${meso.length})`, `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button>`);
   h += `<div class="card">${meso.length ? `<div class="list checks">${meso.map(x => taskRow(x, { edit: true })).join('')}</div>` : '<div class="mute small">Noch keine Aufgaben.</div>'}</div>`;
-  h += sec('Jede Woche (Mikrozyklus)', `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button>`);
-  h += `<div class="card"><div class="small mute" style="margin-bottom:4px">Diese Punkte erscheinen in jeder Woche der Phase zum Abhaken.</div>
+  h += sec('Wochenaufgaben', `<button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button>`);
+  h += `<div class="card"><div class="small mute" style="margin-bottom:4px">Erscheinen in jeder Woche dieser Phase zum Abhaken.</div>
     <div class="list">${mikro.map(x => `<div class="li" data-a="editPtask" data-id="${esc(x.id)}"><div class="grow">${esc(x.title)}</div>${icon('edit', 'chev')}</div>`).join('') || '<div class="mute small">Keine.</div>'}</div></div>`;
   h += sec('Wochen');
   h += `<div class="card list">${weeksOf(p).map(w => {
@@ -655,7 +701,7 @@ function viewWeek(key) {
   h += `<div class="card"><h3>Spiele</h3>${games.length ? `<div class="list">${games.map(gameLine).join('')}</div>` : '<div class="mute small">Kein Spiel in dieser Woche.</div>'}
     <button class="link" data-a="newGame" data-date="${D.add(mon, 5)}">+ Spiel eintragen</button></div>`;
   h += `<div class="card tap" data-a="open" data-h="#/training/woche/${key}"><h3><span class="grow">Training</span><span class="link">Planen</span></h3>${trainingSummary(key)}</div>`;
-  if (p) h += `<div class="card"><h3>Jede Woche erledigen</h3>${weekTaskRows(p, key)}</div>`;
+  if (p) h += `<div class="card"><h3>Wochenaufgaben</h3>${weekTaskRows(p, key)}</div>`;
   h += `<div class="card"><h3>Notizen zur Woche</h3><div class="f" style="margin:0"><textarea data-a="weekField" data-week="${key}" data-f="note" placeholder="z. B. Abwesenheiten, Besonderheiten…">${esc(w.note || '')}</textarea></div></div>`;
   return { title: `Woche · KW ${D.week(mon).week}`, back: true, html: h };
 }
@@ -878,7 +924,7 @@ function viewGame(id) {
   const items = Store.all('checkitem').sort(byOrder), checks = g.checks || {};
   const prep = g.prep || {}, s = setting(), o = outcome(g);
   let h = `<div class="card ${o ? 'o' + o : ''}" style="${o ? `border-left:5px solid ${OUT[o].c}` : ''}"><div class="row"><div class="grow"><div style="font-size:21px;font-weight:800">${esc(g.opponent || 'Spiel')}</div>
-    <div class="small mute">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag noch offen' : D.long(g.date) + ' ' + D.parse(g.date).getFullYear()}</div></div>
+    <div class="small mute">${g.tentative ? 'KW ' + D.week(g.date).week + ' · Tag noch offen' : D.long(g.date) + ' ' + D.parse(g.date).getFullYear()}${g.alt ? ' · evtl. ' + D.long(g.alt) : ''}</div></div>
     ${g.ha ? `<span class="ha ${g.ha}" style="font-size:14px">${g.ha === 'H' ? 'Heim' : 'Auswärts'}</span>` : ''}</div>
     ${o ? `<div class="bigres" style="color:${OUT[o].c}">${esc(resText(g))} <span>${OUT[o].l}</span></div>` : ''}
     <div class="badges">${g.cancelled ? badge('abgesagt', '#64748b') : ''}${g.type ? badge(g.type) : ''}${g.important ? badge('wichtiges Spiel', '#d97706') : ''}${club && club.level ? badge(LEVELS.find(l => l.k === club.level)?.l || club.level) : ''}${g.source ? badge('fussball.de') : ''}</div>
@@ -955,12 +1001,21 @@ function gameForm(g = {}, isNew) {
 }
 // ───────────────────────── Kader ─────────────────────────
 const players = () => Store.all('player').sort(byName);
+// Mannschaftsteil aus der Stammposition: ★ beste Position > meiste Stammpositionen > eingetragener Mannschaftsteil
+const PGRP = { Tor: 'TW', Abwehr: 'Abwehr', Mittelfeld: 'Mittelfeld', Angriff: 'Sturm' };
+function pgroup(p) {
+  if (p.best && posvOf(p.best) && (p.posv || {})[p.best]) return PGRP[posvOf(p.best).g];
+  const st = POSV.filter(P => (p.posv || {})[P.k] === 1); if (!st.length) return p.group || '';
+  const cnt = {}; st.forEach(P => { const g = PGRP[P.g]; cnt[g] = (cnt[g] || 0) + 1; });
+  const mx = Math.max(...Object.values(cnt)), c = GROUPS.filter(g => cnt[g] === mx);
+  return c.includes(p.group) ? p.group : c[0];
+}
 const tierIdx = p => { const i = TIER_RANK.indexOf(p.tier || ''); return i < 0 ? 9 : i; };
 function posChips(p, max = 6) {
   const e = Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1] || POSV.findIndex(x => x.k === a[0]) - POSV.findIndex(x => x.k === b[0]));
   return e.slice(0, max).map(([k, l]) => `<span class="pos l${l}">${posvOf(k)?.l || k}</span>`).join(' ') + (e.length > max ? ` <span class="tiny mute">+${e.length - max}</span>` : '');
 }
-const stammChips = p => POSV.filter(P => (p.posv || {})[P.k] === 1).map(P => `<span class="pos l1">${esc(P.l)}</span>`).join(' ');
+const stammChips = p => POSV.filter(P => (p.posv || {})[P.k] === 1).sort((a, b) => (b.k === p.best) - (a.k === p.best)).map(P => `<span class="pos l1">${P.k === p.best ? '★ ' : ''}${esc(P.l)}</span>`).join(' ');
 const posText = p => Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1]).map(([k, l]) => (posvOf(k)?.l || k) + (l === 2 ? '?' : '')).join(' ');
 function viewKader(parts) {
   const sub = parts[0] || 'tiers';
@@ -1011,14 +1066,14 @@ function posSheet(k) {
 function tierBoard() {
   const ps = players();
   let h = `<div class="small mute" style="margin:0 4px 8px">Spieler gedrückt halten und in eine andere Zeile ziehen – oder antippen und die Stufe wählen.</div>
-    <div class="board"><div></div>${GROUPS.map(g => `<div class="h">${GROUPL[g]} <span>${ps.filter(p => p.group === g).length}</span></div>`).join('')}`;
+    <div class="board"><div></div>${GROUPS.map(g => `<div class="h">${GROUPL[g]} <span>${ps.filter(p => pgroup(p) === g).length}</span></div>`).join('')}`;
   for (const t of TIERS) {
     const row = ps.filter(p => (p.tier || '') === t.k);
     if (!t.k && !row.length) continue;
-    h += `<div class="rl" style="background:${t.c}">${esc(t.s)}<span>${row.length}</span></div>`;
-    for (const g of GROUPS) h += `<div class="cell" data-drop="1" data-tier="${t.k}" data-group="${g}" style="--tb:${t.bg}">${row.filter(p => p.group === g).map(p => `<div class="nm" data-drag="${esc(p.id)}">${esc(p.short || p.name)}${p.number ? `<i>${esc(p.number)}</i>` : ''}</div>`).join('')}</div>`;
+    h += `<div class="rl" style="background:${t.c}">${esc(t.s)}</div>`;
+    for (const g of GROUPS) h += `<div class="cell" data-drop="1" data-tier="${t.k}" data-group="${g}" style="--tb:${t.bg}">${row.filter(p => pgroup(p) === g).map(p => `<div class="nm" data-drag="${esc(p.id)}">${p.best ? '<b class="nst">★</b>' : ''}${esc(p.short || p.name)}${p.number ? `<i>${esc(p.number)}</i>` : ''}</div>`).join('')}</div>`;
   }
-  const noGroup = ps.filter(p => !p.group);
+  const noGroup = ps.filter(p => !pgroup(p));
   h += `</div>${noGroup.length ? `<div class="small mute" style="margin-top:10px">Ohne Mannschaftsteil: ${noGroup.map(p => `<a class="link" data-a="quickTier" data-id="${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}`;
   h += depthView();
   return h;
@@ -1069,15 +1124,15 @@ function posMatrix() {
 function kaderListe() {
   const f = UI.kader;
   let ps = players();
-  if (f.grp) ps = ps.filter(p => p.group === f.grp);
+  if (f.grp) ps = ps.filter(p => pgroup(p) === f.grp);
   if (f.q) ps = ps.filter(p => (p.name + ' ' + (p.short || '') + ' ' + (p.number || '')).toLowerCase().includes(f.q));
   let h = `<input class="search" type="search" placeholder="Spieler suchen…" value="${esc(f.q)}" data-a="kQ"><div id="results">`;
   h += chips([['', `Alle (${players().length})`], ...GROUPS.map(g => [g, GROUPL[g]])], f.grp, 'kGrp');
   for (const t of TIERS) {
-    const list = ps.filter(p => (p.tier || '') === t.k).sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || byName(a, b)); if (!list.length) continue;
+    const list = ps.filter(p => (p.tier || '') === t.k).sort((a, b) => GROUPS.indexOf(pgroup(a)) - GROUPS.indexOf(pgroup(b)) || byName(a, b)); if (!list.length) continue;
     h += `<div class="sec"><span class="dot" style="background:${t.c}"></span><span class="grow">${esc(t.l)} · ${list.length}</span></div><div class="card list">`;
     h += list.map(p => `<div class="pl" data-a="editPlayer" data-id="${esc(p.id)}"><span class="num" style="background:${t.c}">${esc(p.number || '?')}</span>
-      <div class="grow"><div class="t ell">${esc(p.name)}</div><div class="tiny mute" style="margin-top:2px">${esc(GROUPL[p.group] || 'keine Gruppe')}${p.stp ? ' · <b class="stp">Stützpunkt</b>' : ''}${p.note ? ' · ' + esc(p.note) : ''}</div>
+      <div class="grow"><div class="t ell">${esc(p.name)}</div><div class="tiny mute" style="margin-top:2px">${esc(GROUPL[pgroup(p)] || 'keine Gruppe')}${p.stp ? ' · <b class="stp">Stützpunkt</b>' : ''}${p.note ? ' · ' + esc(p.note) : ''}</div>
       <div style="margin-top:5px">${stammChips(p) || '<span class="tiny mute">keine Stammposition</span>'}</div></div>
       <div class="updown"><button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="-1" ${tierIdx(p) === 0 ? 'disabled' : ''} aria-label="Höher einstufen">${icon('up')}</button>
       <button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="1" ${tierIdx(p) >= 3 && p.tier ? 'disabled' : ''} aria-label="Tiefer einstufen">${icon('down')}</button></div></div>`).join('');
@@ -1092,8 +1147,8 @@ function playerForm(p = {}, isNew) {
     fields: [
       [{ k: 'name', l: 'Vorname / Rufname', auto: isNew }, { k: 'number', l: 'Rückennummer', t: 'number' }],
       { k: 'tier', l: 'Einstufung', t: 'seg', opts: TIERS.map(t => [t.k, t.l]) },
-      { k: 'group', l: 'Mannschaftsteil', t: 'seg', opts: [...GROUPS.map(g => [g, GROUPL[g]]), ['', 'keiner']] },
-      { k: 'posv', l: 'Positionen', t: 'posv' },
+      { k: 'group', l: 'Mannschaftsteil (nur wenn keine Stammposition)', t: 'seg', opts: [...GROUPS.map(g => [g, GROUPL[g]]), ['', 'keiner']] },
+      { k: 'posv', l: 'Positionen', t: 'posv', best: p.best || '' },
       { k: 'stp', l: 'Stützpunkt', t: 'toggle' },
       { k: 'note', l: 'Notiz', t: 'textarea' }],
     onSave: async v => {
@@ -1118,9 +1173,10 @@ function dragEnd(commit, x, y) {
   const t = document.elementFromPoint(x, y)?.closest('[data-drop]');
   if (!t) return;
   const p = Store.data(id); if (!p) return;
-  if ((p.tier || '') === t.dataset.tier && p.group === t.dataset.group) return;
-  Store.patch(id, 'player', { tier: t.dataset.tier, group: t.dataset.group });
-  toast(`${p.short || p.name} → ${tierOf(t.dataset.tier).l}`); render();
+  const pg = pgroup(p), stamm = POSV.some(P => (p.posv || {})[P.k] === 1);
+  if ((p.tier || '') === t.dataset.tier && pg === t.dataset.group) return;
+  Store.patch(id, 'player', stamm ? { tier: t.dataset.tier } : { tier: t.dataset.tier, group: t.dataset.group });
+  toast(stamm && pg !== t.dataset.group ? `${p.short || p.name} → ${tierOf(t.dataset.tier).l} · Spalte kommt aus der Stammposition` : `${p.short || p.name} → ${tierOf(t.dataset.tier).l}`); render();
 }
 function dragActivate(x, y) {
   Drag.active = true; Drag.el.classList.add('lifted');
@@ -1899,9 +1955,9 @@ function viewSettings() {
   h += sec('Checklisten der Zyklen', '<span class="tiny">alle Aufgaben je Phase</span>') + phases().map(p => {
     const meso = tasksOf(p.id, 'meso'), mikro = tasksOf(p.id, 'mikro'), done = meso.filter(x => x.done).length;
     return `<details class="cyc" ${cur && cur.id === p.id ? 'open' : ''} style="--pc:${PHC[p.type]}"><summary><span class="dot" style="background:${PHC[p.type]}"></span><span class="grow"><b>${esc(p.label)}</b> <span class="tiny mute">${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></span><span class="cyc-n">${done}/${meso.length}</span></summary>
-      <div class="cyc-b"><div class="sub"><span class="grow">Einmal in der Phase</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button></div>
+      <div class="cyc-b"><div class="sub"><span class="grow">Zyklusaufgaben</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button></div>
       ${meso.length ? `<div class="list checks">${meso.map(x => check(x.done, x.title, `data-a="ptask" data-id="${esc(x.id)}"`)).join('')}</div>` : '<div class="tiny mute">Keine.</div>'}
-      <div class="sub"><span class="grow">Jede Woche</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button></div>
+      <div class="sub"><span class="grow">Wochenaufgaben</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button></div>
       ${mikro.length ? `<div class="clgrid">${mikro.map(x => `<div class="cli" data-a="editPtask" data-id="${esc(x.id)}"><span class="t">${esc(x.title)}</span></div>`).join('')}</div>` : '<div class="tiny mute">Keine.</div>'}
       <button class="link" data-a="open" data-h="#/saison/phase/${p.id}" style="margin-top:8px">Phase öffnen · Aufgaben bearbeiten</button></div></details>`;
   }).join('');
@@ -1985,7 +2041,9 @@ const A = {
   formSave: () => FORM && FORM.onSave(readForm()),
   formDelete: () => FORM && FORM.onDelete && FORM.onDelete(),
   fitCycle: el => { const g = el.closest('[data-fit]'), v = JSON.parse(g.dataset.val), n = el.dataset.n, s = ((v[n] || 0) + 1) % 4; if (s) v[n] = s; else delete v[n]; g.dataset.val = JSON.stringify(v); el.className = 'fit' + s; },
-  posvCycle: el => { const g = el.closest('[data-posv]'), v = JSON.parse(g.dataset.val), p = el.dataset.p, s = ((v[p] || 0) + 1) % 3; if (s) v[p] = s; else delete v[p]; g.dataset.val = JSON.stringify(v); el.className = s ? 'l' + s : ''; el.querySelector('span').textContent = s ? POSVLV[s] : '–'; },
+  posvCycle: el => { const g = el.closest('[data-posv]'), v = JSON.parse(g.dataset.val), p = el.dataset.p, s = ((v[p] || 0) + 1) % 3; if (s) v[p] = s; else delete v[p]; g.dataset.val = JSON.stringify(v); el.className = s ? 'l' + s : ''; el.querySelector('span').textContent = s ? POSVLV[s] : '–'; if (!s && g.dataset.best === p) { g.dataset.best = ''; el.querySelector('.pstar').classList.remove('on'); } },
+  posvStar: el => { const g = el.closest('[data-posv]'), v = JSON.parse(g.dataset.val), p = el.dataset.p; if (!v[p]) { v[p] = 1; g.dataset.val = JSON.stringify(v); const b = el.closest('button'); b.className = 'l1'; b.querySelector('span').textContent = POSVLV[1]; }
+    const on = g.dataset.best !== p; g.dataset.best = on ? p : ''; $$('.pstar', g).forEach(x => x.classList.toggle('on', on && x.dataset.p === p)); },
   // Saison
   ptask: el => { const t = Store.data(el.dataset.id); Store.patch(el.dataset.id, 'ptask', { done: !t.done }); if (!t.done) toast('Erledigt ✓'); render(); },
   wtask: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.tasks = { ...(w.tasks || {}) }; w.tasks[el.dataset.id] = !w.tasks[el.dataset.id]; Store.put('week:' + k, 'week', w); render(); },
@@ -2114,8 +2172,8 @@ const A = {
 };
 function ptaskForm(t, isNew) {
   openForm({
-    title: isNew ? (t.mode === 'mikro' ? 'Wöchentliche Aufgabe' : 'Neue Aufgabe') : 'Aufgabe', value: t,
-    fields: [{ k: 'title', l: 'Aufgabe', auto: isNew }, { k: 'mode', l: 'Art', t: 'seg', opts: [['meso', 'Einmal in der Phase'], ['mikro', 'Jede Woche']] },
+    title: isNew ? (t.mode === 'mikro' ? 'Neue Wochenaufgabe' : 'Neue Zyklusaufgabe') : 'Aufgabe', value: t,
+    fields: [{ k: 'title', l: 'Aufgabe', auto: isNew }, { k: 'mode', l: 'Art', t: 'seg', opts: [['meso', 'Zyklusaufgabe (einmal)'], ['mikro', 'Wochenaufgabe']] },
       { k: 'phase', l: 'Phase', t: 'select', opts: phases().map(p => [p.id, phaseName(p)]) }, { k: 'note', l: 'Notiz', t: 'textarea' }],
     onSave: async v => {
       if (!v.title) return toast('Bitte eine Aufgabe eingeben');
@@ -2228,6 +2286,17 @@ function migrate13() {
     Store.put('setting:migr13', 'setting', { done: D.today() }, true);
   }
   seedZiele();
+  if (!Store.data('setting:migr16') && phases().length) {
+    for (const p of phases().filter(p => p.type === 'nachb'))
+      if (!tasksOf(p.id, 'meso').some(x => /material/i.test(x.title || '') && /prüf|check|kontroll/i.test(x.title || '')))
+        Store.put('ptask:mat-' + p.id.replace(/[^a-z0-9]/gi, ''), 'ptask', { phase: p.id, mode: 'meso', title: 'Material überprüfen', done: false, order: 9e6 }, true);
+    for (const g of Store.all('game')) {
+      if (!/^\d+\. Spieltag/.test(g.opponent || '') || g.date < D.today()) continue;
+      const wd = dayIdx(g.date), sat = wd === 7 ? D.add(g.date, -1) : g.date;
+      if (dayIdx(sat) === 6) Store.put(g.id, 'game', { ...Store.data(g.id), date: sat, alt: D.add(sat, 1) }, true);
+    }
+    Store.put('setting:migr16', 'setting', { done: D.today() }, true);
+  }
   Undo.off--; if (Object.keys(Store.pending).length) Store.flushSoon();
 }
 async function startApp(user) {
