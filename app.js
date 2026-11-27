@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.8';
+const VERSION = '1.9';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -125,7 +125,8 @@ const RATE = { 1: { c: '#dc2626', l: 'schwach' }, 2: { c: '#f2711c', l: 'mäßig
 const slotTaken = s => Store.all('game').some(g => !g.cancelled && g.date === s.date);
 // Ferien: Kalenderwochen, gespeichert in setting:holidays { weeks: { '2026-W43': 'Herbstferien', … } }
 const holidays = () => (Store.data('setting:holidays') || {}).weeks || {};
-const isHoliday = date => !!holidays()[D.week(date).key];
+const holDays = () => (Store.data('setting:holidays') || {}).days || {};
+const isHoliday = date => { const dd = holDays(); return date in dd ? !!dd[date] : !!holidays()[D.week(date).key]; };
 // Offene Testspieltermine: gespeicherte Termine + automatisch jedes Wochenende (Sa/So) in der Saison außerhalb der Ferien, ohne Spiel
 function allSlots() {
   const stored = Store.all('slot'), byDay = new Map(stored.map(x => [x.date, x])), ps = phases(), out = [...stored];
@@ -271,7 +272,19 @@ let LAST = {}; try { LAST = JSON.parse(localStorage.getItem('ca_last') || '{}');
 
 let lastHash = null;
 const NAV = { stack: [], back: false };
+// Zyklusaufgabe „Testspielplanung“ ist automatisch erledigt, wenn in den folgenden 2 Zyklen kein ??? mehr offen ist
+function syncAutoTasks() {
+  const ps = phases(), open = slots(); if (!ps.length) return; let ch = false;
+  Undo.off++;
+  for (const t of Store.all('ptask').filter(x => x.auto === 'tests')) {
+    const i = ps.findIndex(p => p.id === t.phase), nx = ps.slice(i + 1, i + 3);
+    const done = !nx.some(p => open.some(q => q.date >= p.start && q.date <= p.end));
+    if (!!t.done !== done) { Store.put(t.id, 'ptask', { ...Store.data(t.id), done }, true); ch = true; }
+  }
+  Undo.off--; if (ch) Store.flushSoon();
+}
 function render() {
+  try { syncAutoTasks(); } catch (e) { console.error(e); }
   const r = route(), sameRoute = lastHash === location.hash, y = window.scrollY;
   if (lastHash && !sameRoute) { if (NAV.back) NAV.back = false; else { NAV.stack.push(lastHash); if (NAV.stack.length > 40) NAV.stack.shift(); } }
   lastHash = location.hash;
@@ -398,7 +411,7 @@ const confirmDel = what => confirm(`${what} wirklich löschen?`);
 const phases = () => Store.all('phase').sort((a, b) => a.start.localeCompare(b.start));
 const phaseAt = d => phases().find(p => p.start <= d && d <= p.end);
 const nextPhase = d => phases().find(p => p.start > d);
-const phaseName = p => `${p.label} · ${MAKRO[p.makro] || p.makro}`;
+const phaseName = p => `${MAKRO[p.makro] || p.makro} · ${p.label}`;
 function weeksOf(p) { const o = []; let m = D.week(p.start).monday; while (m <= p.end) { o.push(D.week(m)); m = D.add(m, 7); } return o; }
 const tasksOf = (pid, mode) => Store.all('ptask').filter(t => t.phase === pid && (t.mode || 'meso') === mode).sort(byOrder);
 const weekData = key => Store.data('week:' + key) || {};
@@ -408,8 +421,9 @@ const weekGames = key => { const m = D.fromKey(key); return gamesBetween(m, D.ad
 function taskRow(t, opts = {}) {
   return `<div class="checkwrap">${check(t.done, t.title, `data-a="ptask" data-id="${esc(t.id)}"`, opts.sub || '')}${opts.edit ? `<button class="iconbtn" data-a="editPtask" data-id="${esc(t.id)}" aria-label="Bearbeiten">${icon('edit')}</button>` : ''}</div>`;
 }
+const weekOver = key => D.add(D.fromKey(key), 6) < D.today();
 function weekTaskRows(p, key) {
-  const tasks = tasksOf(p.id, 'mikro'), done = weekData(key).tasks || {};
+  const tasks = tasksOf(p.id, 'mikro'), done = weekOver(key) ? Object.fromEntries(tasks.map(t => [t.id, true])) : (weekData(key).tasks || {});
   if (!tasks.length) return '<div class="mute small">Keine wöchentlichen Aufgaben für diese Phase.</div>';
   return `<div class="list checks">${tasks.map(t => check(!!done[t.id], t.title, `data-a="wtask" data-id="${esc(t.id)}" data-week="${key}"`)).join('')}</div>`;
 }
@@ -676,10 +690,10 @@ window.addEventListener('scroll', () => { const p = $('#calpop'); if (p) { p.rem
 function calView() {
   const ps = phases(), t = D.today(), curKey = D.week(t).key, sl = slots(), hols = holidays();
   const games = Store.all('game').filter(g => !g.cancelled), alts = new Set(games.map(g => g.alt).filter(Boolean));
-  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-e">E</i> Event</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span><button class="ferbtn ${FERIEN.on ? 'on' : ''}" data-a="ferienMode">${FERIEN.on ? '✓ Fertig' : '+ Ferien'}</button></div>${FERIEN.on ? '<div class="ferhint">Wochen antippen, um sie als Ferien zu markieren – nochmal antippen entfernt sie. Danach „Fertig“.</div>' : ''}<div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div><div class="cw-plan"></div></div>`, lastP = null;
+  let m = D.week(ps[0].start).monday, h = `<div class="calleg"><span><i class="cm-t">T</i> Training</span><span><i class="cm-g"></i> Spiel</span><span><i class="cm-e">E</i> Event</span><span><i class="cm-q">?</i> noch offen</span><span><i class="cm-bar"></i> Schwerpunkt</span><button class="ferbtn ${FERIEN.on ? 'on' : ''}" data-a="ferienMode">${FERIEN.on ? '✓ Fertig' : '+ Ferien'}</button></div>${FERIEN.on ? '<div class="ferhint">KW antippen = ganze Woche Ferien an/aus · einzelnen Tag antippen = nur dieser Tag (Ferien oder Feiertag). Danach „Fertig“.</div>' : ''}<div class="cal"><div class="cw head"><div class="cw-kw"></div><div class="cw-days">${["Mo","Di","Mi","Do","Fr","Sa","So"].map(x => `<span>${x}</span>`).join("")}</div></div>`, lastP = null;
   while (m <= ps[ps.length - 1].end) {
     const w = D.week(m), wd = weekData(w.key), wph = GP[wd.phase], p = phaseAt(m) || phaseAt(D.add(m, 6)), days = weekDays(w.key), evs = weekEvents(w.key), hol = hols[w.key];
-    if (p && p !== lastP && (!lastP || p.id !== lastP.id)) { h += `<div class="cal-ph" style="--pc:${PHC[p.type]}"><b>${esc(p.label)}</b> ${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</div>`; lastP = p; }
+    if (p && p !== lastP && (!lastP || p.id !== lastP.id)) { h += `<div class="cal-ph" style="--pc:${PHC[p.type]}"><b>${MAKRO[p.makro]} · ${esc(p.label)}</b> ${D.short(p.start)}–${D.short(p.end)}</div>`; lastP = p; }
     let cells = '';
     for (let i = 0; i < 7; i++) {
       const d = D.add(m, i), gs = games.filter(g => g.date === d), q = sl.filter(x => x.date === d), tr = days.includes(i + 1) && p && !(((wd.days || {})[i + 1] || {}).cancelled), alt = alts.has(d), ev = evs.filter(e => e.d === i + 1);
@@ -688,12 +702,12 @@ function calView() {
       if (alt) mk += `<i class="cm-q">?</i>`;
       if (tr) mk += `<i class="cm-t">T</i>`;
       if (ev.length) mk += `<i class="cm-e">E</i>`;
-      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''} ${hol ? 'hol' : ''}" ${gs.length ? `data-g="${d}"` : ''} data-a="${FERIEN.on ? 'ferienWeek' : 'open'}" data-week="${w.key}" data-h="#/training/woche/${w.key}"><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
+      cells += `<button class="cd ${d === t ? 'today' : ''} ${d < t ? 'past' : ''} ${i >= 5 ? 'we' : ''} ${isHoliday(d) ? 'hol' : ''}" ${gs.length ? `data-g="${d}"` : ''} data-a="${FERIEN.on ? 'ferienDay' : 'open'}" data-d="${d}" data-h="#/training/woche/${w.key}"><span class="cdn">${D.parse(d).getDate()}</span><span class="cdm">${mk}</span></button>`;
     }
     h += `<div class="cw ${w.key === curKey ? 'now' : ''} ${D.add(m, 6) < t ? 'pastw' : ''} ${hol ? 'hol' : ''}" ${w.key === curKey ? 'id="cw-now"' : ''}>
-      <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" ${FERIEN.on ? `data-a="ferienWeek" data-week="${w.key}"` : ''} title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'kein Schwerpunkt'}"><b>KW ${w.week}</b><small title="${hol ? esc(hol) : ''}">${hol ? 'Ferien' : D.short(m)}</small></div>
+      <div class="cw-kw" style="--c:${wph ? wph.c : 'var(--line)'}" ${FERIEN.on ? `data-a="ferienWeek" data-week="${w.key}"` : `data-a="open" data-h="#/training/woche/${w.key}"`} title="${wph ? 'Schwerpunkt: ' + esc(wph.l) : 'Woche planen'}"><b>KW ${w.week}</b></div>
       <div class="cw-days">${cells}</div>
-      <button class="cw-plan" data-a="open" data-h="#/training/woche/${w.key}" aria-label="Woche planen" title="Woche planen">${icon('edit')}</button></div>`;
+</div>`;
     m = D.add(m, 7);
   }
   return h + `</div>`;
@@ -719,7 +733,7 @@ function viewPhase(pid) {
     <div class="list">${mikro.map(x => `<div class="li" data-a="editPtask" data-id="${esc(x.id)}"><div class="grow">${esc(x.title)}</div>${icon('edit', 'chev')}</div>`).join('') || '<div class="mute small">Keine.</div>'}</div></div>`;
   h += sec('Wochen');
   h += `<div class="card list">${weeksOf(p).map(w => {
-    const games = weekGames(w.key), wd = weekData(w.key), dn = Object.values(wd.tasks || {}).filter(Boolean).length;
+    const games = weekGames(w.key), wd = weekData(w.key), dn = weekOver(w.key) ? mikro.length : Object.values(wd.tasks || {}).filter(Boolean).length;
     const planned = Object.values(wd.days || {}).filter(d => (d.topics || []).length || (d.exercises || []).length || (d.athletics || []).length).length, wph = GP[wd.phase];
     return `<div class="weekrow ${w.key === curKey ? 'now' : ''}" data-a="open" data-h="#/saison/woche/${w.key}"><div class="kw">KW ${w.week}</div>
       <div class="grow" style="min-width:0"><div class="small"><b>${D.short(w.monday)}–${D.short(D.add(w.monday, 6))}</b>${w.key === curKey ? ' · <b style="color:var(--accent)">aktuell</b>' : ''}</div>
@@ -1341,7 +1355,7 @@ function periodView() {
     <div class="tiny mute" style="margin-top:6px">Schwerpunkt antippen, um ihn für die Woche festzulegen. Die Woche selbst antippen, um das Training zu planen.</div></div>`;
   for (const p of ps) {
     const ws = weeksOf(p);
-    h += `<div class="pmeso" style="--pc:${PHC[p.type]}"><div class="pm-h"><b>${esc(p.label)}</b> <span>${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></div>${distBar(ws.map(w => w.key))}</div>`;
+    h += `<div class="pmeso" style="--pc:${PHC[p.type]}"><div class="pm-h"><b>${MAKRO[p.makro]} · ${esc(p.label)}</b> <span>${D.short(p.start)}–${D.short(p.end)}</span></div>${distBar(ws.map(w => w.key))}</div>`;
     h += `<div class="card list pweeks">`;
     for (const w of ws) {
       const ph = GP[weekData(w.key).phase], games = weekGames(w.key), wdd = weekData(w.key).days || {}, qs = slots().filter(x => x.date >= w.monday && x.date <= D.add(w.monday, 6));
@@ -1390,6 +1404,15 @@ function viewTraining(parts) {
   else h += trainingWeek(parts[1] || D.week(D.today()).key);
   return { title: 'Training', html: h, fab };
 }
+function makroDistribution(ps) {
+  const cnt = {}; let total = 0;
+  for (const p of ps) for (const w of weeksOf(p)) { const ph = weekData(w.key).phase; if (GP[ph] && ph !== 'FREI') { cnt[ph] = (cnt[ph] || 0) + 1; total++; } }
+  const mk = ps[0] ? MAKRO[ps[0].makro] : '';
+  if (!total) return `<div class="tiny mute">${esc(mk)}: noch keine Wochenschwerpunkte</div>`;
+  const keys = Object.keys(GP).filter(k => cnt[k]);
+  return `<div class="whd-h"><b>${esc(mk)}</b><span>${total} Wochen</span></div><div class="distbar">${keys.map(k => `<i style="width:${cnt[k] / total * 100}%;background:${GP[k].c}"></i>`).join('')}</div>
+    <div class="legend">${keys.map(k => `<span><span class="dot" style="background:${GP[k].c};width:8px;height:8px"></span> ${gpS(k)} ${cnt[k]}×</span>`).join('')}</div>`;
+}
 function mesoDistribution(p) {
   const cnt = {}; let total = 0;
   for (const w of weeksOf(p)) { const ph = weekData(w.key).phase; if (GP[ph] && ph !== 'FREI') { cnt[ph] = (cnt[ph] || 0) + 1; total++; } }
@@ -1404,12 +1427,14 @@ function rateRow(key, d, dd) {
 function trainingWeek(key) {
   const mon = D.fromKey(key), p = phaseAt(mon) || phaseAt(D.add(mon, 6)), w = weekData(key), days = weekDays(key), extra = w.extraDays || [];
   const prev = D.week(D.add(mon, -7)).key, next = D.week(D.add(mon, 7)).key, wp = GP[w.phase];
-  let h = `<div class="weekhead"><div class="wh-nav"><button class="iconbtn" data-a="open" data-h="#/training/woche/${prev}" aria-label="Vorherige Woche">${icon('left')}</button>
-    <div class="grow"><div class="wh-kw">KW ${D.week(mon).week} <span class="wh-dates">${D.short(mon)}–${D.short(D.add(mon, 6))}</span></div><div class="wh-sub">${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div></div>
+  const mk = p ? phases().filter(x => x.makro === p.makro) : [], cur = D.week(D.today()).key;
+  let h = p ? `<div class="card whdist">${makroDistribution(mk)}</div>` : '';
+  h += `<div class="weekhead"><div class="wh-nav"><button class="iconbtn" data-a="open" data-h="#/training/woche/${prev}" aria-label="Vorherige Woche">${icon('left')}</button>
+    <div class="grow"><div class="wh-kw">KW ${D.week(mon).week}</div><div class="wh-dates">${D.short(mon)}–${D.short(D.add(mon, 6))}</div><div class="wh-sub">${p ? esc(phaseName(p)) : 'keine Saisonphase'}</div>
+    <button class="wh-now ${key === cur ? 'on' : ''}" data-a="open" data-h="#/training/woche/${cur}" ${key === cur ? 'disabled' : ''}>akt. Woche</button></div>
     <button class="iconbtn" data-a="open" data-h="#/training/woche/${next}" aria-label="Nächste Woche">${icon('right')}</button></div>
     <button class="phpick wk ${wp ? 'set' : ''}" style="--c:${wp ? wp.c : 'var(--mute)'}" data-a="phasePick" data-week="${key}">
-      <span class="wk-main">${wp ? `<span class="phcode">${esc(wp.s)}</span> ${esc(wp.l)}` : 'Schwerpunkt der Woche wählen'}</span><small>${wp ? 'Schwerpunkt der Woche · antippen zum Ändern' : 'Spielphase, die diese Woche im Mittelpunkt steht'}</small></button>
-    ${p ? `<div class="wh-dist"><div class="tiny mute">Wochenschwerpunkte in der ${esc(p.label)} bisher</div>${mesoDistribution(p)}</div>` : ''}</div>`;
+      <span class="wk-main">${wp ? `<span class="phcode">${esc(wp.s)}</span> ${esc(wp.l)}` : 'Schwerpunkt der Woche'}</span></button></div>`;
   let past = '';
   UI.pastOpen = UI.pastOpen || {};
   for (const d of days) {
@@ -2006,7 +2031,7 @@ function viewSettings() {
   const cur = phaseAt(D.today());
   h += sec('Checklisten der Zyklen', '<span class="tiny">alle Aufgaben je Phase</span>') + phases().map(p => {
     const meso = tasksOf(p.id, 'meso'), mikro = tasksOf(p.id, 'mikro'), done = meso.filter(x => x.done).length;
-    return `<details class="cyc" ${cur && cur.id === p.id ? 'open' : ''} style="--pc:${PHC[p.type]}"><summary><span class="dot" style="background:${PHC[p.type]}"></span><span class="grow"><b>${esc(p.label)}</b> <span class="tiny mute">${MAKRO[p.makro]} · ${D.short(p.start)}–${D.short(p.end)}</span></span><span class="cyc-n">${done}/${meso.length}</span></summary>
+    return `<details class="cyc" ${cur && cur.id === p.id ? 'open' : ''} style="--pc:${PHC[p.type]}"><summary><span class="dot" style="background:${PHC[p.type]}"></span><span class="grow"><b>${MAKRO[p.makro]} · ${esc(p.label)}</b> <span class="tiny mute">${D.short(p.start)}–${D.short(p.end)}</span></span><span class="cyc-n">${done}/${meso.length}</span></summary>
       <div class="cyc-b"><div class="sub"><span class="grow">Zyklusaufgaben</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="meso">+ Aufgabe</button></div>
       ${meso.length ? `<div class="list checks">${meso.map(x => check(x.done, x.title, `data-a="ptask" data-id="${esc(x.id)}"`)).join('')}</div>` : '<div class="tiny mute">Keine.</div>'}
       <div class="sub"><span class="grow">Wochenaufgaben</span><button class="link" data-a="addPtask" data-phase="${p.id}" data-mode="mikro">+ Aufgabe</button></div>
@@ -2064,7 +2089,8 @@ const A = {
   evDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.events = (w.events || []).filter(e => e.id !== el.dataset.id); Store.put('week:' + k, 'week', w); render(); },
   xDayDel: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.extraDays = (w.extraDays || []).filter(d => d !== +el.dataset.day); Store.put('week:' + k, 'week', w); render(); },
   ferienMode: () => { FERIEN.on = !FERIEN.on; if (!FERIEN.on) toast('Ferien gespeichert'); render(); },
-  ferienWeek: el => { const k = el.dataset.week, h = { ...holidays() }; if (h[k]) delete h[k]; else h[k] = 'Ferien'; Store.put('setting:holidays', 'setting', { ...(Store.data('setting:holidays') || {}), weeks: h }); render(); },
+  ferienWeek: el => { const k = el.dataset.week, h = { ...holidays() }, m = D.fromKey(k), dd = { ...holDays() }; if (h[k]) delete h[k]; else h[k] = 'Ferien'; for (let i = 0; i < 7; i++) delete dd[D.add(m, i)]; Store.put('setting:holidays', 'setting', { ...(Store.data('setting:holidays') || {}), weeks: h, days: dd }); render(); },
+  ferienDay: el => { const d = el.dataset.d, dd = { ...holDays() }; dd[d] = !isHoliday(d); Store.put('setting:holidays', 'setting', { ...(Store.data('setting:holidays') || {}), days: dd }); render(); },
   trCancel: el => { const k = el.dataset.week, d = el.dataset.day, dd = ((weekData(k).days || {})[d]) || {}; setDay(k, d, { cancelled: !dd.cancelled }); render(); },
   newGoal: () => goalForm({ area: UI.ziele || 'training', sub: UI.ziele === 'ideen' ? 'Multisportiv' : '' }, true),
   editGoal: el => { const g = Store.get(el.dataset.id); if (g) goalForm(g); },
@@ -2123,7 +2149,7 @@ const A = {
   posvStar: el => { const g = el.closest('[data-posv]'), v = JSON.parse(g.dataset.val), p = el.dataset.p; if (!v[p]) { v[p] = 1; g.dataset.val = JSON.stringify(v); const b = el.closest('button'); b.className = 'l1'; b.querySelector('span').textContent = POSVLV[1]; }
     const on = g.dataset.best !== p; g.dataset.best = on ? p : ''; $$('.pstar', g).forEach(x => x.classList.toggle('on', on && x.dataset.p === p)); },
   // Saison
-  ptask: el => { const t = Store.data(el.dataset.id); Store.patch(el.dataset.id, 'ptask', { done: !t.done }); if (!t.done) toast('Erledigt ✓'); render(); },
+  ptask: el => { const t = Store.data(el.dataset.id); if (t.auto) { render(); return toast('Wird automatisch abgehakt, sobald in den nächsten 2 Zyklen kein ??? mehr offen ist'); } Store.patch(el.dataset.id, 'ptask', { done: !t.done }); if (!t.done) toast('Erledigt ✓'); render(); },
   wtask: el => { const k = el.dataset.week, w = { ...weekData(k) }; w.tasks = { ...(w.tasks || {}) }; w.tasks[el.dataset.id] = !w.tasks[el.dataset.id]; Store.put('week:' + k, 'week', w); render(); },
   addPtask: el => ptaskForm({ phase: el.dataset.phase, mode: el.dataset.mode }, true),
   editPtask: el => ptaskForm(Store.get(el.dataset.id)),
@@ -2385,6 +2411,18 @@ function migrate13() {
     const hv = phases().find(p => p.makro === 'HR' && p.type === 'vorb');
     if (hv && !tasksOf(hv.id, 'meso').some(x => /ferien/i.test(x.title || ''))) Store.put('ptask:ferien-hr', 'ptask', { phase: hv.id, mode: 'meso', title: 'Ferien für die Saison eintragen (Saison → Kalender → + Ferien)', done: true, order: 1 }, true);
     Store.put('setting:migr18', 'setting', { done: D.today() }, true);
+  }
+  if (!Store.data('setting:migr19') && phases().length) {
+    for (const p of phases()) {
+      const ts = tasksOf(p.id, 'meso').filter(x => /testspiel/i.test(x.title || ''));
+      ts.forEach(x => Store.remove(x.id));
+      Store.put('ptask:tests-' + p.id.replace(/[^a-z0-9]/gi, ''), 'ptask', { phase: p.id, mode: 'meso', title: 'Testspielplanung (nächste 2 Zyklen)', auto: 'tests', done: false, order: 2 }, true);
+    }
+    const hw = phases().find(p => p.makro === 'HR' && p.type === 'wettk');
+    if (hw && !tasksOf(hw.id, 'meso').some(x => /turnier/i.test(x.title || ''))) Store.put('ptask:turnier-hr', 'ptask', { phase: hw.id, mode: 'meso', title: 'Turnierplanung', done: false, order: 3 }, true);
+    if (!Store.items.has('goal:s26')) Store.put('goal:s26', 'goal', { area: 'spiel', sub: '', title: 'Outdoor-Turniere', text: 'Regelmäßig auf Outdoor-Turnieren spielen: viele Spiele gegen unbekannte Gegner, Turnierhärte, Teamerlebnis.', kw: ['turnier'], href: '', hrefL: '', pulse: '', impulse: '', ord: 10.5 }, true);
+    const hd = Store.data('setting:holidays'); if (hd) Store.put('setting:holidays', 'setting', { ...hd, days: { ...(hd.days || {}), '2027-05-18': true } }, true);
+    Store.put('setting:migr19', 'setting', { done: D.today() }, true);
   }
   Undo.off--; if (Object.keys(Store.pending).length) Store.flushSoon();
 }

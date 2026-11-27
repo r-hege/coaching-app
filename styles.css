@@ -1043,3 +1043,19 @@ main>.seg:first-child,main>.seg.stick{top:calc(var(--toph,60px) + 12px);outline:
 .sl-res{border:1.5px solid var(--line);background:none;border-radius:9px;padding:4px 9px;font-size:12px;font-weight:700;color:var(--mute);cursor:pointer}
 .sl-res.on{background:#15803d;border-color:#15803d;color:#fff}
 .sl-found{margin-top:9px}
+
+/* ───── Version 1.9 ───── */
+.wh-kw{display:block;text-align:center;font-size:30px}
+.wh-dates{display:block;text-align:center;font-size:15px;margin-top:1px}
+.wh-sub{font-weight:650}
+.wh-now{display:block;margin:8px auto 0;border:1.5px solid var(--accent);color:var(--accent);background:none;border-radius:999px;padding:4px 14px;font-size:12.5px;font-weight:800;cursor:pointer}
+.wh-now.on{opacity:.4;cursor:default}
+.phpick.wk .wk-main{font-size:15px}
+.whdist{padding:10px 14px}
+.whdist .distbar{height:9px;margin:6px 0 5px}
+.whd-h{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mute)}
+.whd-h b{color:var(--ink)}
+.cw-kw{cursor:pointer;width:50px}
+.cw-kw b{font-size:12.5px}
+.cd.hol{background:repeating-linear-gradient(135deg,color-mix(in srgb,#0891b2 16%,var(--soft)) 0 5px,var(--soft) 5px 10px)}
+.cw.hol .cd:not(.hol){background:var(--soft)}
