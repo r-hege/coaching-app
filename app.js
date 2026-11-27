@@ -4,7 +4,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const REMOTE = !!(CFG.supabaseUrl && CFG.supabaseKey);
-const VERSION = '1.4';
+const VERSION = '1.5';
 
 // ───────────────────────── Hilfsfunktionen ─────────────────────────
 const $ = (s, r = document) => r.querySelector(s);
@@ -78,7 +78,7 @@ const POSV = [
   { k: 'SECHS', l: 'ZDM', f: 'Zentrales defensives Mittelfeld (ZDM)', g: 'Mittelfeld' }, { k: 'ACHT', l: 'ZM', f: 'Zentrales Mittelfeld (ZM)', g: 'Mittelfeld' },
   { k: 'ZEHN', l: 'ZOM', f: 'Zentrales offensives Mittelfeld (ZOM)', g: 'Mittelfeld' },
   { k: 'LF', l: 'LF', f: 'Linker Flügel', g: 'Angriff' }, { k: 'RF', l: 'RF', f: 'Rechter Flügel', g: 'Angriff' },
-  { k: 'ACHTFUENF', l: '8,5', f: 'Hängende Spitze (8,5)', g: 'Angriff' }, { k: 'NEUN', l: '9', f: 'Spitze (9)', g: 'Angriff' }];
+  { k: 'ACHTFUENF', l: '8,5', f: 'Hängende Spitze (8,5)', g: 'Angriff' }, { k: 'NEUN', l: 'ST', f: 'Stürmer (ST)', g: 'Angriff' }];
 const posvOf = k => POSV.find(p => p.k === k);
 const POSVLV = { 1: 'Stamm', 2: 'in Frage' };
 const GROUPS = ['TW', 'Abwehr', 'Mittelfeld', 'Sturm'];
@@ -244,7 +244,7 @@ const UI = { vereine: { q: '', inc: false }, ex: { n: null, diff: '', int: '', p
   games: { when: 'next', type: '' }, tests: { lvls: new Set(), st: '', q: '' }, contacts: { q: '' }, scout: { prio: '', q: '' }, topics: { ph: '' }, mat: 'need' };
 
 const TABS = [
-  { k: 'heute', l: 'Heute' }, { k: 'saison', l: 'Saison' }, { k: 'spiele', l: 'Spiele' }, { k: 'kader', l: 'Kader' },
+  { k: 'heute', l: 'Kabine' }, { k: 'saison', l: 'Saison' }, { k: 'spiele', l: 'Spiele' }, { k: 'kader', l: 'Kader' },
   { k: 'training', l: 'Training' }, { k: 'tests', l: 'Testspiele' }];
 
 function route() {
@@ -272,6 +272,8 @@ function render() {
   $('#view').innerHTML = out.html + (main ? `<button class="fab" data-a="quick" data-ctx="${out.fab || ''}" aria-label="Schnell hinzufügen">${icon('plus')}</button>`
     : out.fab ? `<button class="fab" data-a="${out.fab}" aria-label="Neu">${icon('plus')}</button>` : '');
   window.scrollTo(0, sameRoute ? y : 0);
+  document.documentElement.style.setProperty('--toph', $('#top').offsetHeight + 'px');
+  if (Sheet.kind === 'todo' && !$('#sheet').hidden) todoSheet();
   Sync.show();
 }
 
@@ -292,6 +294,7 @@ const chips = (items, cur, action, extra = '') => `<div class="chips ${extra}">$
 const Sheet = {
   pushed: false, onClose: null,
   open(title, body, foot = '', mount) {
+    this.kind = null;
     const el = $('#sheet'), prevBody = $('.sheet-body', el), keep = !el.hidden && prevBody && $('.sheet-head h2', el)?.textContent === title ? prevBody.scrollTop : 0;
     el.innerHTML = `<div class="sheet-bg" data-a="sheetClose"></div><div class="sheet-panel" role="dialog">
       <div class="sheet-head"><button class="link" data-a="sheetClose">Schließen</button><h2>${esc(title)}</h2><span class="sp"></span></div>
@@ -306,7 +309,7 @@ const Sheet = {
       if (this.pushed) { this._res = res; this.pushed = false; history.back(); } else { this._hide(); res(); }
     });
   },
-  _hide() { const el = $('#sheet'); el.hidden = true; el.innerHTML = ''; document.body.classList.remove('noscroll'); const r = this._res; this._res = null; r && r(); },
+  _hide() { this.kind = null; const el = $('#sheet'); el.hidden = true; el.innerHTML = ''; document.body.classList.remove('noscroll'); const r = this._res; this._res = null; r && r(); },
 };
 window.addEventListener('popstate', () => { if (!$('#sheet').hidden) { Sheet.pushed = false; Sheet._hide(); } });
 
@@ -488,14 +491,9 @@ function squadDue(g) {
   return wd >= 6 ? new Date(D.add(g.date, 5 - wd) + 'T18:00') : new Date(D.add(g.date, -wd) + 'T14:00');
 }
 const todoRow = (ic, title, sub, attrs, right = '') => `<div class="todo" ${attrs}><span class="ti">${icon(ic)}</span><div class="grow"><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>${right || icon('chev', 'chev')}</div>`;
-function viewHeute() {
-  if (!phases().length && !Store.all('game').length) return { title: 'Heute', html: emptyState() };
-  const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t);
-  let h = weekCal(t);
-  const g = nextGame(t), ag = agenda(t);
-  if (ag) h += sec('Als Nächstes') + ag;
-
-  // Zu erledigen – alles an einem Ort
+// Zu erledigen – alles an einem Ort (als Popup über den großen Knopf in der Kabine)
+function todoData() {
+  const t = D.today(), cur = phaseAt(t), nxt = nextPhase(t), wk = D.week(t), g = nextGame(t);
   let todo = '', n = 0;
   const nr = Store.all('game').filter(needsResult).sort(byDate);
   for (const x of nr.slice(0, 3)) { n++; todo += todoRow('spiele', `Ergebnis: ${esc(shortOpp(x.opponent))}`, D.long(x.date), `data-a="quickResult" data-id="${esc(x.id)}"`, '<span class="link">Eintragen</span>'); }
@@ -523,8 +521,30 @@ function viewHeute() {
     const on = tasksOf(nxt.id, 'meso').filter(x => !x.done).length;
     if (on) { n++; todo += todoRow('saison', `Bald: ${esc(phaseName(nxt))}`, `startet ${relDay(nxt.start)} · ${cap(on, 'Aufgabe', 'Aufgaben')} vorbereiten`, `data-a="open" data-h="#/saison/phase/${nxt.id}"`); }
   }
-  h += sec('Zu erledigen', n ? `<span class="nbadge static">${n}</span>` : '');
-  h += `<div class="card todos">${todo || '<div class="mute small" style="padding:6px 2px">Alles erledigt 🎉</div>'}</div>`;
+
+  return { html: todo, n };
+}
+const CLEAN = ['Alles erledigt. Kopf frei – ab auf den Platz.', 'Nichts mehr offen. Sauber!', 'Liste leer. Durchatmen, Kaffee, weiter.', 'Alles abgehakt – heute gewinnt die Ruhe.', 'Clean. Hier gibt es gerade nichts zu tun.'];
+const cleanMsg = () => CLEAN[D.parse(D.today()).getDate() % CLEAN.length];
+function todoBig() {
+  const { html, n } = todoData(), tmp = document.createElement('div'); tmp.innerHTML = html;
+  const prev = [...tmp.querySelectorAll('.todo .t, .check .ct')].slice(0, 2).map(x => x.childNodes[0]?.textContent || x.textContent).filter(Boolean);
+  if (!n) return `<button class="todobig clean" data-a="todoSheet"><span class="tb-n">✓</span><span class="grow"><b>Zu erledigen</b><small>${esc(cleanMsg())}</small></span></button>`;
+  return `<button class="todobig" data-a="todoSheet"><span class="tb-n">${n}</span><span class="grow"><b>Zu erledigen</b><small>${esc(prev.join(' · '))}</small></span>${icon('chev', 'chev')}</button>`;
+}
+function todoSheet() {
+  const { html, n } = todoData();
+  Sheet.open('Zu erledigen', n || html ? `<div class="todos insheet">${html.replace(/data-a="open"/g, 'data-a="todoGo"').replace(/data-a="testsStatus"/g, 'data-a="todoTests"')}</div>`
+    : `<div class="cleanbox"><div class="cb-i">✓</div><b>${esc(cleanMsg())}</b></div>`);
+  Sheet.kind = 'todo';
+}
+function viewHeute() {
+  if (!phases().length && !Store.all('game').length) return { title: 'Kabine', html: emptyState() };
+  const t = D.today();
+  let h = todoBig() + weekCal(t);
+  const ag = agenda(t);
+  if (ag) h += sec('Als Nächstes') + ag;
+
 
   // Form kompakt
   const played = Store.all('game').filter(x => !x.cancelled && x.date < t && outcome(x)).sort(byDate);
@@ -534,7 +554,7 @@ function viewHeute() {
     h += sec('Form') + `<div class="card tap formmini" data-a="open" data-h="#/spiele"><div class="grow"><div class="fm-big">${avg.toFixed(1).replace('.', ',')} <span>Punkte/Spiel (letzte 5)</span></div>
       <div class="small mute">${tot.S} S · ${tot.U} U · ${tot.N} N</div></div><div>${last5.map(x => `<span class="fdot" style="background:${OUT[outcome(x)].c}">${outcome(x)}</span>`).join('')}</div>${icon('chev', 'chev')}</div>`;
   }
-  return { title: 'Heute', html: h };
+  return { title: 'Kabine', html: h };
 }
 
 // ───────────────────────── Saison (Makro → Meso → Mikro) ─────────────────────────
@@ -940,6 +960,7 @@ function posChips(p, max = 6) {
   const e = Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1] || POSV.findIndex(x => x.k === a[0]) - POSV.findIndex(x => x.k === b[0]));
   return e.slice(0, max).map(([k, l]) => `<span class="pos l${l}">${posvOf(k)?.l || k}</span>`).join(' ') + (e.length > max ? ` <span class="tiny mute">+${e.length - max}</span>` : '');
 }
+const stammChips = p => POSV.filter(P => (p.posv || {})[P.k] === 1).map(P => `<span class="pos l1">${esc(P.l)}</span>`).join(' ');
 const posText = p => Object.entries(p.posv || {}).sort((a, b) => a[1] - b[1]).map(([k, l]) => (posvOf(k)?.l || k) + (l === 2 ? '?' : '')).join(' ');
 function viewKader(parts) {
   const sub = parts[0] || 'tiers';
@@ -1002,25 +1023,31 @@ function tierBoard() {
   h += depthView();
   return h;
 }
-// Besetzung einer Position: mit Top-Spieler reicht 1 Guter dahinter; ohne Top 3 Gute oder 2 Gute + 2 Okay. 8,5 wird nicht bewertet.
+// Tiefe einer Position (1–5): 5 = 2 Top + 2 Gut · 4 = 1 Top + 2 Gut · 3 = 3 Gute · 2 = 2 Gute + 1 Okay · sonst 1 (0 = niemand). „In Frage“ zählt eine Stufe tiefer. 8,5 wird nicht bewertet.
+const DEPTH = { 5: { c: '#16a34a', s: '✓' }, 4: { c: '#16a34a', s: '✓' }, 3: { c: '#ea8a0c', s: '!' }, 2: { c: '#dc2626', s: '!' }, 1: { c: '#dc2626', s: '!' }, 0: { c: '#dc2626', s: '!' } };
 function depthInfo(k) {
-  const el = eligible(k), T = el.filter(x => x.e.rank === 0).length, G = el.filter(x => x.e.rank === 1).length, O = el.filter(x => x.e.rank === 2).length;
-  if (k === 'ACHTFUENF') return { T, G, O, st: 'skip', msg: 'wird nicht bewertet' };
-  if (T >= 1) return T + G >= 2 ? { T, G, O, st: 'ok', msg: 'Top + Absicherung' } : { T, G, O, st: 'thin', msg: 'es fehlt 1 Guter hinter dem Top-Spieler' };
-  if (G >= 3 || (G === 2 && O >= 2)) return { T, G, O, st: 'ok', msg: G >= 3 ? `${G} Gute` : '2 Gute + Okay dahinter' };
-  const a = `${3 - G}× Gut`, nG = Math.max(0, 2 - G), nO = Math.max(0, 2 - O), b = [nG ? `${nG}× Gut` : '', nO ? `${nO}× Okay` : ''].filter(Boolean).join(' + ');
-  return { T, G, O, st: 'thin', msg: `kein Top · es fehlen ${a}${b && b !== a ? ' oder ' + b : ''}` };
+  const el = eligible(k), T = el.filter(x => x.e.rank === 0).length, G = el.filter(x => x.e.rank === 1).length, O = el.filter(x => x.e.rank === 2).length, TG = T + G;
+  if (k === 'ACHTFUENF') return { T, G, O, sc: -1, st: 'skip', msg: 'wird nicht bewertet' };
+  const sc = T >= 2 && TG >= 4 ? 5 : T >= 1 && TG >= 3 ? 4 : TG >= 3 ? 3 : TG >= 2 && TG + O >= 3 ? 2 : TG + O ? 1 : 0;
+  const next = { 4: 'für 5/5: 2 Top + 2 Gut', 3: 'für 4/5: 1 Top dazu', 2: 'für 3/5: noch 1 Guter', 1: 'für 2/5: 2 Gute + 1 Okay', 0: 'niemand eingeplant' }[sc] || 'top besetzt';
+  return { T, G, O, sc, st: sc >= 4 ? 'top' : sc === 3 ? 'ok' : 'thin', msg: next };
 }
 function depthView() {
-  const all = POSV.map(P => ({ P, ...depthInfo(P.k) })), thin = all.filter(x => x.st === 'thin'), rest = all.filter(x => x.st !== 'thin');
-  const tile = x => `<div class="dtile ${x.st}" data-a="posSheet" data-k="${x.P.k}"><div class="dt-h"><b>${esc(x.P.l)}</b><span class="dt-st">${x.st === 'ok' ? '✓' : x.st === 'thin' ? '!' : '–'}</span></div>
+  const all = POSV.map(P => ({ P, ...depthInfo(P.k) })).sort((a, b) => a.sc - b.sc), grp = st => all.filter(x => x.st === st);
+  const pips = sc => `<span class="pips">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= sc ? 'on' : ''}"></i>`).join('')}</span>`;
+  const tile = x => { const d = DEPTH[x.sc] || { c: 'var(--mute)', s: '–' };
+    return `<div class="dtile ${x.st}" style="--dc:${d.c}" data-a="posSheet" data-k="${x.P.k}"><div class="dt-h"><b>${esc(x.P.l)}</b><span class="dt-st">${d.s}</span></div>
+    ${x.sc >= 0 ? `<div class="dt-sc">${pips(x.sc)}<span>${x.sc}/5</span></div>` : ''}
     <div class="dt-n">${[['T', 0, 'Top'], ['G', 1, 'Gut'], ['O', 2, 'Okay']].map(([f, r, l]) => `<span style="--tc:${TIERS[r].c}" class="${x[f] ? '' : 'zero'}"><b>${x[f]}</b>${l}</span>`).join('')}</div>
-    <div class="dt-m">${esc(x.msg)}</div></div>`;
-  let h = sec('Tiefe pro Position', `<span class="tiny">${thin.length ? `<b style="color:#dc2626">${thin.length} zu dünn</b>` : '<b style="color:#16a34a">alle gut besetzt</b>'}</span>`);
-  h += `<div class="card"><div class="tiny mute" style="margin-bottom:10px">Regel: Mit Top-Spieler reicht <b>1 Guter</b> dahinter. Ohne Top braucht es <b>3 Gute</b> – oder <b>2 Gute + 2 Okay</b>. 8,5 zählt nicht.</div>`;
-  if (thin.length) h += `<div class="dgrp bad">Zu dünn besetzt · ${thin.length}</div><div class="dgrid">${thin.map(tile).join('')}</div>`;
-  h += `<div class="dgrp">Ausreichend · ${rest.filter(x => x.st === 'ok').length}</div><div class="dgrid">${rest.map(tile).join('')}</div></div>`;
-  return h;
+    <div class="dt-m">${esc(x.msg)}</div></div>`; };
+  const thin = grp('thin'), ok = grp('ok'), top = grp('top'), skip = grp('skip');
+  let h = sec('Tiefe pro Position', `<span class="tiny">${thin.length ? `<b style="color:#dc2626">${thin.length} zu dünn</b>` : '<b style="color:#16a34a">nichts zu dünn</b>'}</span>`);
+  h += `<div class="card"><div class="tiny mute" style="margin-bottom:10px"><b>5/5</b> 2 Top + 2 Gut · <b>4/5</b> 1 Top + 2 Gut · <b>3/5</b> 3 Gute · <b>2/5</b> 2 Gute + 1 Okay · darunter 1/5. „In Frage“ zählt eine Stufe tiefer.</div>`;
+  if (thin.length) h += `<div class="dgrp" style="color:#dc2626">Zu dünn · ${thin.length}</div><div class="dgrid">${thin.map(tile).join('')}</div>`;
+  if (ok.length) h += `<div class="dgrp" style="color:#ea8a0c">Ausreichend · ${ok.length}</div><div class="dgrid">${ok.map(tile).join('')}</div>`;
+  if (top.length) h += `<div class="dgrp" style="color:#16a34a">Sehr gut besetzt · ${top.length}</div><div class="dgrid">${top.map(tile).join('')}</div>`;
+  if (skip.length) h += `<div class="dgrp">Ohne Bewertung</div><div class="dgrid">${skip.map(tile).join('')}</div>`;
+  return h + '</div>';
 }
 function quickTier(id) {
   const p = Store.get(id); if (!p) return;
@@ -1050,8 +1077,8 @@ function kaderListe() {
     const list = ps.filter(p => (p.tier || '') === t.k).sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || byName(a, b)); if (!list.length) continue;
     h += `<div class="sec"><span class="dot" style="background:${t.c}"></span><span class="grow">${esc(t.l)} · ${list.length}</span></div><div class="card list">`;
     h += list.map(p => `<div class="pl" data-a="editPlayer" data-id="${esc(p.id)}"><span class="num" style="background:${t.c}">${esc(p.number || '?')}</span>
-      <div class="grow"><div class="t ell">${esc(p.name)}</div><div class="tiny mute" style="margin-top:2px">${esc(GROUPL[p.group] || 'keine Gruppe')}${p.note ? ' · ' + esc(p.note) : ''}</div>
-      <div style="margin-top:5px">${posChips(p)}</div></div>
+      <div class="grow"><div class="t ell">${esc(p.name)}</div><div class="tiny mute" style="margin-top:2px">${esc(GROUPL[p.group] || 'keine Gruppe')}${p.stp ? ' · <b class="stp">Stützpunkt</b>' : ''}${p.note ? ' · ' + esc(p.note) : ''}</div>
+      <div style="margin-top:5px">${stammChips(p) || '<span class="tiny mute">keine Stammposition</span>'}</div></div>
       <div class="updown"><button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="-1" ${tierIdx(p) === 0 ? 'disabled' : ''} aria-label="Höher einstufen">${icon('up')}</button>
       <button class="iconbtn" data-a="tierMove" data-id="${esc(p.id)}" data-d="1" ${tierIdx(p) >= 3 && p.tier ? 'disabled' : ''} aria-label="Tiefer einstufen">${icon('down')}</button></div></div>`).join('');
     h += '</div>';
@@ -1499,19 +1526,19 @@ function slotCands(q) {
     .sort((a, b) => (clubStatus(a) === 'pending' ? 0 : 1) - (clubStatus(b) === 'pending' ? 0 : 1) || lvlRank(a.level) - lvlRank(b.level) || byName(a, b));
 }
 function slotCard(q) {
-  const p = phaseAt(q.date), c = slotCands(q), n = D.diff(D.today(), q.date);
-  return `<div class="card qslot"><div class="sl-h"><div class="sl-q">???</div><div class="grow"><div class="sl-d">${D.long(q.date)}${q.kickoff ? ' · ' + esc(q.kickoff) + ' Uhr' : ''}</div>
+  const p = phaseAt(q.date), n = D.diff(D.today(), q.date);
+  return `<div class="card qslot ${q.wip ? 'wip' : ''}"><div class="sl-h"><button class="sl-q" data-a="slotWip" data-id="${esc(q.id)}" aria-label="${q.wip ? 'In Bearbeitung – antippen zum Zurücksetzen' : 'Als in Bearbeitung markieren'}">???</button>
+      <div class="grow"><div class="sl-d">${D.long(q.date)}${q.kickoff ? ' · ' + esc(q.kickoff) + ' Uhr' : ''}</div>
       <div class="tiny mute">${relDay(q.date)}${p ? ' · ' + esc(phaseName(p)) : ''}${q.ha ? ' · ' + (q.ha === 'H' ? 'Heim' : 'Auswärts') : ''}</div></div>
-      <span class="sl-days ${n <= 21 ? 'soon' : ''}">${n} T.</span><button class="iconbtn" data-a="editSlot" data-id="${esc(q.id)}" aria-label="Bearbeiten">${icon('edit')}</button></div>
-    ${q.note ? `<div class="small" style="margin:8px 0 0">${esc(q.note)}</div>` : ''}
-    <div class="sub"><span class="grow">Passende Vereine · ${(q.levels || []).length ? q.levels.map(esc).join(', ') : 'jedes Niveau'} · ${c.length}</span>${c.length ? `<button class="link" data-a="slotPool" data-id="${esc(q.id)}">im Gegnerpool</button>` : ''}</div>
-    <div class="sl-c">${c.slice(0, 6).map(x => `<span class="slc" data-a="openClub" data-id="${esc(x.id)}"><i style="background:${LVC[x.level || '']}">${esc(x.level || '–')}</i>${esc(x.name)}${clubStatus(x) === 'pending' ? ' <b>wartet</b>' : ''}</span>`).join('') || '<span class="tiny mute">Keine Vereine für dieses Niveau im Gegnerpool.</span>'}</div>
-    <button class="btn primary sm" style="margin-top:10px" data-a="slotFound" data-id="${esc(q.id)}">Gegner gefunden → als Spiel eintragen</button></div>`;
+      <span class="sl-days ${n <= 21 && !q.wip ? 'soon' : ''}">${n} T.</span><button class="iconbtn" data-a="editSlot" data-id="${esc(q.id)}" aria-label="Bearbeiten">${icon('edit')}</button></div>
+    <div class="sl-body">${q.note ? `<div class="small" style="margin:8px 0 0">${esc(q.note)}</div>` : ''}
+    <button class="btn primary sm" style="margin-top:10px" data-a="slotFound" data-id="${esc(q.id)}">Gegner gefunden → als Spiel eintragen</button>
+    ${q.wip ? `<div class="sl-wip" data-a="slotWip" data-id="${esc(q.id)}"><b>In Bearbeitung</b><small>antippen, um es wieder zu öffnen</small></div>` : ''}</div></div>`;
 }
 function termineView() {
-  const t = D.today(), all = slots(), up = all.filter(x => x.date >= t), past = all.filter(x => x.date < t);
-  let h = `<div class="tiny mute" style="margin:0 4px 10px">Freie Tage, an denen noch ein Testspielgegner fehlt. Sie stehen als <b>???</b> in Heute, im Spielplan und in der Periodisierung – sobald an dem Tag ein Spiel eingetragen ist, verschwinden sie.</div>`;
-  h += up.map(slotCard).join('') || '<div class="empty">Keine offenen Termine. Mit + einen freien Tag anlegen.</div>';
+  const t = D.today(), all = slots(), up = all.filter(x => x.date >= t).sort((a, b) => (a.wip ? 1 : 0) - (b.wip ? 1 : 0) || byDate(a, b)), past = all.filter(x => x.date < t);
+  let h = up.length ? `<div class="tiny mute" style="margin:0 4px 10px">Tipp: <b>???</b> antippen = in Bearbeitung (rutscht nach unten).</div>` + up.map(slotCard).join('')
+    : `<div class="cleanbox"><div class="cb-i">✓</div><b>Alle Termine vergeben.</b><span>Kein ??? mehr – hier ist alles clean.</span></div>`;
   if (past.length) h += sec('Vorbei, ohne Gegner') + `<div class="card list">${past.map(x => `<div class="li" data-a="editSlot" data-id="${esc(x.id)}"><div class="grow"><div class="t">${D.long(x.date)}</div><div class="s">${esc(x.note || 'kein Spiel eingetragen')}</div></div>${icon('edit', 'chev')}</div>`).join('')}</div>`;
   return h;
 }
@@ -1660,18 +1687,147 @@ function contactForm(c = {}, isNew) {
   });
 }
 
+// ───────────────────────── Ziele (Kompass) ─────────────────────────
+const ZAREAS = [
+  { k: 'training', l: 'Training', d: 'Was wir im Training erreichen wollen' },
+  { k: 'spiel', l: 'Spiel', d: 'Was man am Wochenende sehen soll' },
+  { k: 'platz', l: 'Neben dem Platz', s: 'Umfeld', d: 'Team, Kultur, Rituale, Eltern' },
+  { k: 'entw', l: 'Entwicklung', d: 'Spieler und Trainer werden besser' },
+  { k: 'ideen', l: 'Ideen', d: 'Multisport & Teamevents' }];
+const ZPULSE = {
+  more: { l: 'Mehr davon', s: 'läuft – weiter reingehen', c: '#16a34a' },
+  ok: { l: 'Passt', s: 'auf Kurs', c: '#7c74a8' },
+  new: { l: 'Neuer Impuls', s: 'braucht frische Ideen', c: '#d97706' }};
+const IDEA_SUBS = ['Multisportiv', 'Teamevent'];
+const goals = area => Store.all('goal').filter(g => !area || g.area === area).sort((a, b) => (a.ord ?? 99) - (b.ord ?? 99) || byName(a, b));
+const goalTasks = g => { const kw = (g.kw || []).map(x => x.toLowerCase()).filter(Boolean); if (!kw.length) return []; const m = new Map(); for (const t of Store.all('ptask')) { const ti = (t.title || '').trim(); if (!kw.some(k => ti.toLowerCase().includes(k))) continue; const o = m.get(ti); m.set(ti, { title: ti, done: o ? o.done && !!t.done : !!t.done }); } return [...m.values()].slice(0, 5); };
+const lastReview = () => Store.data('setting:zreview')?.date || '';
+function goalCard(g) {
+  const pu = ZPULSE[g.pulse], tk = goalTasks(g);
+  return `<div class="card goal" style="--gc:${pu ? pu.c : 'var(--line)'}" data-a="editGoal" data-id="${esc(g.id)}">
+    <div class="gl-h"><b class="grow">${esc(g.title)}</b>${pu ? `<span class="gl-p" style="--gc:${pu.c}">${esc(pu.l)}</span>` : ''}</div>
+    ${g.text ? `<div class="gl-t">${esc(g.text)}</div>` : ''}
+    ${g.impulse ? `<div class="gl-i">${icon('right')}<span>${esc(g.impulse)}</span></div>` : ''}
+    ${tk.length ? `<div class="gl-k">${tk.map(t => `<span class="${t.done ? 'done' : ''}">${t.done ? '✓' : '○'} ${esc(t.title)}</span>`).join('')}</div>` : ''}
+    ${g.href ? `<button class="link sm" data-a="open" data-h="${esc(g.href)}">${esc(g.hrefL || 'öffnen')} ›</button>` : ''}</div>`;
+}
+function viewZiele(parts) {
+  const area = ZAREAS.some(a => a.k === parts[1]) ? parts[1] : (UI.ziele || 'training'); UI.ziele = area;
+  const A0 = ZAREAS.find(a => a.k === area), all = Store.all('goal').filter(g => g.area !== 'ideen');
+  let h = `<div class="seg sub3">${ZAREAS.map(a => `<button class="${area === a.k ? 'on' : ''}" data-a="open" data-h="#/mehr/ziele/${a.k}">${esc(a.s || a.l)}</button>`).join('')}</div>`;
+  const lr = lastReview(), cnt = k => all.filter(g => g.pulse === k).length;
+  h += `<div class="card kompass"><div class="km-h"><div class="grow"><b>Kompass</b><small>${lr ? `zuletzt durchgegangen ${relDay(lr)}` : 'noch nie durchgegangen'}</small></div>
+      <button class="btn primary sm" data-a="zReview">Durchgehen</button></div>
+    <div class="km-p">${Object.entries(ZPULSE).map(([k, p]) => `<span style="--gc:${p.c}"><b>${cnt(k)}</b>${esc(p.l)}</span>`).join('')}<span style="--gc:var(--mute)"><b>${all.filter(g => !ZPULSE[g.pulse]).length}</b>offen</span></div></div>`;
+  h += `<div class="tiny mute" style="margin:2px 4px 10px">${esc(A0.d)}</div>`;
+  if (area === 'ideen') {
+    for (const sub of IDEA_SUBS) {
+      const list = goals('ideen').filter(g => (g.sub || 'Multisportiv') === sub), open = list.filter(g => !g.done), done = list.filter(g => g.done);
+      h += sec(`${sub} · ${open.length} offen`) + `<div class="card list">${[...open, ...done].map(g => `<div class="idea ${g.done ? 'done' : ''}">
+        <label class="ib"><input type="checkbox" ${g.done ? 'checked' : ''} data-a="ideaDone" data-id="${esc(g.id)}"><span class="box"></span></label>
+        <div class="grow" data-a="editGoal" data-id="${esc(g.id)}"><div class="t">${esc(g.title)}</div>${g.text || g.doneAt ? `<div class="s">${g.done && g.doneAt ? 'gemacht ' + esc(D.short(g.doneAt)) + (g.text ? ' · ' : '') : ''}${esc(g.text || '')}</div>` : ''}</div></div>`).join('') || '<div class="empty">Noch keine Ideen.</div>'}</div>`;
+    }
+    return { title: 'Ziele', back: true, html: h, fab: 'newGoal' };
+  }
+  const list = goals(area), subs = [...new Set(list.map(g => g.sub || ''))];
+  for (const sub of subs) { if (sub) h += sec(sub); h += list.filter(g => (g.sub || '') === sub).map(goalCard).join(''); }
+  if (!list.length) h += '<div class="empty">Noch keine Ziele. Mit + anlegen.</div>';
+  return { title: 'Ziele', back: true, html: h, fab: 'newGoal' };
+}
+function goalForm(g = {}, isNew) {
+  const idea = (g.area || UI.ziele) === 'ideen';
+  openForm({
+    title: isNew ? (idea ? 'Neue Idee' : 'Neues Ziel') : (idea ? 'Idee' : 'Ziel'), value: { area: UI.ziele || 'training', ...g, kw: (g.kw || []).join(', ') },
+    fields: idea ? [
+      { k: 'title', l: 'Idee', t: 'text', ph: 'z. B. Bouldern' },
+      { k: 'sub', l: 'Art', t: 'seg', opts: IDEA_SUBS.map(x => [x, x]) },
+      { k: 'text', l: 'Notiz', t: 'textarea', ph: 'Wo, wer organisiert, Kosten …' },
+      { k: 'done', l: 'Schon gemacht', t: 'toggle' }] : [
+      { k: 'title', l: 'Ziel', t: 'text' },
+      { k: 'area', l: 'Bereich', t: 'select', opts: ZAREAS.filter(a => a.k !== 'ideen').map(a => [a.k, a.l]) },
+      { k: 'sub', l: 'Gruppe (optional)', t: 'text', ph: 'z. B. Spieler · Gesundheit' },
+      { k: 'text', l: 'Worum geht es?', t: 'textarea' },
+      { k: 'pulse', l: 'Wie läuft es?', t: 'seg', opts: [...Object.entries(ZPULSE).map(([k, p]) => [k, p.l]), ['', 'offen']] },
+      { k: 'impulse', l: 'Nächster Impuls', t: 'textarea', ph: 'Was probieren wir als Nächstes?' },
+      { k: 'kw', l: 'Aufgaben verknüpfen (Stichworte)', t: 'text', ph: 'z. B. Blutbild, Ernährung', hint: 'Saisonaufgaben mit diesen Wörtern erscheinen beim Ziel.' }],
+    onSave: async v => {
+      if (!v.title) return toast('Bitte einen Titel eingeben');
+      const prev = g.id ? Store.data(g.id) : {}, d = { ...prev, ...v, kw: String(v.kw || '').split(',').map(x => x.trim()).filter(Boolean) };
+      if (idea) { d.area = 'ideen'; if (d.done && !prev.done) d.doneAt = D.today(); if (!d.done) d.doneAt = ''; }
+      Store.put(g.id || uid('goal'), 'goal', d); await Sheet.close(); render();
+    },
+    onDelete: isNew ? null : async () => { if (!confirmDel(idea ? 'Idee' : 'Ziel')) return; Store.remove(g.id); await Sheet.close(); render(); },
+  });
+}
+// Durchgehen: ein Ziel nach dem anderen bewerten
+function zReviewStep() {
+  const R = UI.zrev, g = R && Store.get(R.ids[R.i]);
+  if (!g) { Store.put('setting:zreview', 'setting', { date: D.today() }); UI.zrev = null; Sheet.close().then(() => { toast('Durchgang fertig ✓'); render(); }); return; }
+  const ar = ZAREAS.find(a => a.k === g.area), tk = goalTasks(g);
+  Sheet.open('Ziele durchgehen', `<div class="zr">
+    <div class="zr-p"><span>${R.i + 1} / ${R.ids.length}</span><span class="grow"><i style="width:${Math.round((R.i + 1) / R.ids.length * 100)}%"></i></span></div>
+    <div class="tiny mute" style="text-transform:uppercase;font-weight:800;letter-spacing:.4px">${esc(ar ? ar.l : '')}${g.sub ? ' · ' + esc(g.sub) : ''}</div>
+    <h3>${esc(g.title)}</h3>${g.text ? `<p>${esc(g.text)}</p>` : ''}
+    ${tk.length ? `<div class="gl-k">${tk.map(t => `<span class="${t.done ? 'done' : ''}">${t.done ? '✓' : '○'} ${esc(t.title)}</span>`).join('')}</div>` : ''}
+    <div class="zr-b">${Object.entries(ZPULSE).map(([k, p]) => `<button class="${g.pulse === k ? 'on' : ''}" style="--gc:${p.c}" data-a="zRate" data-v="${k}"><b>${esc(p.l)}</b><small>${esc(p.s)}</small></button>`).join('')}</div>
+    <div class="f"><label for="zr-imp">Nächster Impuls (optional)</label><textarea id="zr-imp" placeholder="Was probieren wir als Nächstes?">${esc(g.impulse || '')}</textarea></div>
+    </div>`, `<button class="btn" data-a="zRate" data-v="skip">Überspringen</button>`);
+}
+const ZIELE_SEED = [
+  ['training', '', 'Spielprinzipien einstudieren', 'Die Prinzipien aus der Spielidee sind das, was wir im Training einüben: jede Woche ein Schwerpunkt, Übungen danach auswählen.', ['spielidee'], '#/training/lexikon/team', 'Lexikon Mannschaftstaktik'],
+  ['training', '', 'Spaß haben', 'Die Jungs kommen gerne – Wettbewerb, Lachen, Erfolgserlebnisse. Wenn die Stimmung kippt: Spielform statt Übung.', ['spaß']],
+  ['training', '', 'Hohe Intensität', 'Viele Ballkontakte, viele Zweikämpfe, wenig Warten. Spielformen mit Zählen und Gewinnern.'],
+  ['training', '', 'Abwechslung & Multisport', 'Nicht immer das Gleiche: ab und zu andere Sportarten für Koordination, Athletik und Motivation.', ['multisport'], '#/mehr/ziele/ideen', 'Ideenliste'],
+  ['training', '', 'Athletik als fester Baustein', 'Laufschule, Stabilität, Schnelligkeit – kurz, regelmäßig, altersgerecht.', ['athletik'], '#/training/lexikon/athletik', 'Lexikon Athletik'],
+  ['spiel', '', 'Mutig & offensiv denken', 'Kreativität über Sicherheit in der Kreativzone, Effizienz über Schönheit in der Angriffszone.'],
+  ['spiel', '', 'Aus dem Druck heraus spielen', 'Offene Stellung, Pass in den offenen Fuß, jeder Ball bekommt ein Kommando, kein 1 gegen 1 im eigenen Drittel.'],
+  ['spiel', '', 'Sofort umschalten', '6-Sekunden-Regel nach Ballverlust, auf direktem Weg hinter den Ball. Nach Ballgewinn schnell in die Tiefe.'],
+  ['spiel', '', 'Kompakt gegen den Ball', 'Mittelfeldpressing als Grundordnung, Angriffspressing als Waffe.'],
+  ['spiel', '', 'Standards als Waffe', 'Ecken, Freistöße, Einwürfe einstudiert – einfache Abläufe, die jeder kennt.'],
+  ['spiel', '', 'Gut vorbereitet in jedes Spiel', 'Treffpunkt, Kader, Formation, Prematch-Routine – damit die Jungs sich nur aufs Spiel konzentrieren.', ['spielvorbereitung']],
+  ['platz', '', 'Rituale', 'Gemeinsame Abläufe geben Halt: Stutzen gemeinsam in der Kabine, Kreis vor dem Spiel, Abklatschen danach.', ['ritual']],
+  ['platz', '', 'Regeln & Verantwortung', 'Regelkatalog, Kapitän und Mannschaftsrat – die Jungs übernehmen selbst Verantwortung.', ['regel', 'kapitän', 'mannschaftsrat']],
+  ['platz', '', 'Teamgeist durch Events', 'Regelmäßig etwas zusammen erleben – nicht nur Fußball.', ['teamevent', 'teambuilding'], '#/mehr/ziele/ideen', 'Ideenliste'],
+  ['platz', '', 'Eltern mitnehmen', 'Elternabend, Elterngespräche, klare Infos – Eltern als Unterstützer, nicht als Zuschauer am Rand.', ['eltern']],
+  ['platz', '', 'Spielergespräche', 'Jeder Spieler weiß, wo er steht und woran er arbeitet.', ['spielergespräch']],
+  ['entw', 'Spieler', 'Laufstil verbessern', 'Lauf-ABC, Armeinsatz, Fußaufsatz – sauber laufen ist schneller laufen.', ['lauf']],
+  ['entw', 'Spieler', 'Kräftiger werden', 'Rumpf und Stabilität zuerst, mit Körpergewicht – Grundlage für Zweikämpfe und Verletzungsschutz.', ['kraft']],
+  ['entw', 'Spieler', 'Ausdauer & Schnelligkeit', 'Spielnahe Intervalle, Antritt, Richtungswechsel.'],
+  ['entw', 'Spieler', 'Technisch besser', 'Ballgefühl, beidfüßig, erster Kontakt – viele Wiederholungen mit Ball.'],
+  ['entw', 'Spieler', 'Mental stärker', 'Mut, Umgang mit Fehlern, Selbstvertrauen, Konzentration über 70 Minuten.', ['mental']],
+  ['entw', 'Spieler', 'Gesundheit, Ernährung & Schlaf', 'Die Gesundheit jedes Spielers ist wichtig: Blutbild, bessere Ernährung, genug Schlaf.', ['blutbild', 'ernährung', 'schlaf']],
+  ['entw', 'Trainer', 'Spielidee überprüfen & schärfen', 'Regelmäßig reflektieren: Passt die Spielidee noch zur Mannschaft? Saisonfazit ziehen.', ['spielidee', 'reflexion', 'fazit']],
+  ['entw', 'Trainer', 'Neue Impulse holen', 'Hospitieren (z. B. im NLZ), Fortbildungen, Bücher, Podcasts, Austausch mit anderen Trainern.', ['fortbildung']],
+  ['entw', 'Trainer', 'Trainerteam stärken', 'Aufgaben im Trainerteam klar verteilen, Feedback untereinander.', ['trainerteam']]];
+const IDEEN_SEED = [
+  ['Multisportiv', 'Bouldern / Klettern'], ['Multisportiv', 'Basketball'], ['Multisportiv', 'Handball'], ['Multisportiv', 'Hockey'], ['Multisportiv', 'Rugby / Tag-Rugby'],
+  ['Multisportiv', 'Ringen & Raufen (Zweikampf)'], ['Multisportiv', 'Leichtathletik: Sprint & Sprung'], ['Multisportiv', 'Schwimmen / Wassertraining'], ['Multisportiv', 'Tanz / Rhythmus-Koordination'],
+  ['Multisportiv', 'Yoga / Mobility'], ['Multisportiv', 'Badminton / Tischtennis (Reaktion)'], ['Multisportiv', 'Frisbee / Ultimate'], ['Multisportiv', 'Trampolinhalle'],
+  ['Teamevent', 'Stadionbesuch'], ['Teamevent', 'Grillen mit Eltern'], ['Teamevent', 'Weihnachtsfeier'], ['Teamevent', 'Kinoabend'], ['Teamevent', 'Kanu- oder Fahrradtour'],
+  ['Teamevent', 'Escape Room / Lasertag'], ['Teamevent', 'Kochabend: Ernährung für Fußballer'], ['Teamevent', 'Übernachtung im Vereinsheim'], ['Teamevent', 'Elternteam vs. Mannschaft'],
+  ['Teamevent', 'Training bei den Kleinen helfen'], ['Teamevent', 'Schiri-Workshop'], ['Teamevent', 'NLZ-Training anschauen'], ['Teamevent', 'Saisonabschluss']];
+function seedZiele() {
+  if (Store.data('setting:migr15')) return;
+  ZIELE_SEED.forEach(([area, sub, title, text, kw, href, hrefL], i) => Store.put('goal:s' + String(i + 1).padStart(2, '0'), 'goal', { area, sub, title, text, kw: kw || [], href: href || '', hrefL: hrefL || '', pulse: '', impulse: '', ord: i }, true));
+  IDEEN_SEED.forEach(([sub, title], i) => Store.put('goal:i' + String(i + 1).padStart(2, '0'), 'goal', { area: 'ideen', sub, title, text: '', done: false, ord: i }, true));
+  Store.put('setting:migr15', 'setting', { done: D.today() }, true);
+}
+
 // ───────────────────────── Mehr: Material, Scouting, Einstellungen ─────────────────────────
 function viewMehr(parts) {
   const sub = parts[0];
   if (sub === 'kontakte') return viewKontakte();
   if (sub === 'vereine') return viewVereine();
+  if (sub === 'ziele') return viewZiele(parts);
   if (sub === 'material') return viewMaterial();
   if (sub === 'scouting') return viewScouting();
   if (sub === 'einstellungen') return viewSettings();
   const n = k => Store.all(k).length;
   const need = Store.all('material').filter(m => m.list !== 'have' && !m.done).length;
   const item = (h, ic, t, s) => `<div class="li" data-a="open" data-h="${h}"><span class="actions"><a>${icon(ic)}</a></span><div class="grow"><div class="t">${t}</div><div class="s">${s}</div></div>${icon('chev', 'chev')}</div>`;
+  const gz = Store.all('goal').filter(g => g.area !== 'ideen'), lr = lastReview();
   const html = `<div class="card list">
+    ${item('#/mehr/ziele', 'star', 'Ziele', `${cap(gz.length, 'Ziel', 'Ziele')} · ${gz.filter(g => g.pulse === 'new').length} brauchen neue Impulse${lr ? ' · durchgegangen ' + relDay(lr) : ''}`)}
     ${item('#/mehr/kontakte', 'phone', 'Kontakte', cap(n('contact'), 'Kontakt', 'Kontakte'))}
     ${item('#/mehr/vereine', 'tests', 'Vereine', `${cap(n('club'), 'Verein', 'Vereine')} · ${Store.all('club').filter(c => clubMissing(c).length).length} unvollständig`)}
     ${item('#/mehr/material', 'box', 'Material', need ? `${need} Dinge zu besorgen` : 'Bestand & Einkaufsliste')}
@@ -1782,6 +1938,20 @@ const VIEWS = { heute: viewHeute, saison: viewSaison, spiele: viewSpiele, kader:
 const A = {
   tab: el => { const k = el.dataset.k; if (route().tab === k) { go('#/' + k); window.scrollTo({ top: 0, behavior: 'smooth' }); } else go(LAST[k] || '#/' + k); },
   open: el => go(el.dataset.h),
+  todoSheet: () => todoSheet(),
+  newGoal: () => goalForm({ area: UI.ziele || 'training', sub: UI.ziele === 'ideen' ? 'Multisportiv' : '' }, true),
+  editGoal: el => { const g = Store.get(el.dataset.id); if (g) goalForm(g); },
+  ideaDone: el => { const g = Store.data(el.dataset.id); if (!g) return; Store.put(el.dataset.id, 'goal', { ...g, done: !g.done, doneAt: !g.done ? D.today() : '' }); if (!g.done) toast('Gemacht ✓'); render(); },
+  zReview: () => { const ids = ZAREAS.filter(a => a.k !== 'ideen').flatMap(a => goals(a.k).map(g => g.id)); if (!ids.length) return toast('Noch keine Ziele'); UI.zrev = { ids, i: 0 }; zReviewStep(); },
+  zRate: el => {
+    const R = UI.zrev; if (!R) return; const id = R.ids[R.i], g = Store.data(id), imp = $('#zr-imp')?.value ?? '';
+    if (g && el.dataset.v !== 'skip') Store.put(id, 'goal', { ...g, pulse: el.dataset.v, impulse: imp, reviewed: D.today() });
+    else if (g && imp !== (g.impulse || '')) Store.put(id, 'goal', { ...g, impulse: imp });
+    R.i++; zReviewStep();
+  },
+  todoGo: async el => { await Sheet.close(); go(el.dataset.h); },
+  todoTests: async el => { await Sheet.close(); UI.tests.st = el.dataset.v; go('#/tests/pool'); },
+  slotWip: el => { const q = Store.data(el.dataset.id); if (!q) return; Store.put(el.dataset.id, 'slot', { ...q, wip: !q.wip }); toast(q.wip ? 'Wieder offen' : 'In Bearbeitung'); render(); },
   back: () => history.length > 1 ? history.back() : go('#/heute'),
   syncInfo: () => toast(!REMOTE ? 'Lokaler Testmodus' : Store.error ? 'Fehler: ' + Store.error : Object.keys(Store.pending).length ? 'Speichert…' : 'Alles gespeichert ✓'),
   sheetClose: () => Sheet.close(),
@@ -1989,7 +2159,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const el = e.target, a = el.dataset.a;
   if (el.closest('#sheet') && el.closest('[data-multi]')) { updateCounts($('#sheet')); return; }
-  if (['ptask', 'wtask', 'gcheck', 'matDone'].includes(a)) return A[a](el, e);
+  if (['ptask', 'wtask', 'gcheck', 'matDone', 'ideaDone'].includes(a)) return A[a](el, e);
   if (a === 'exSel') { UI.ex[el.dataset.f] = el.value; return render(); }
   if (a === 'weekField') { const k = el.dataset.week, w = { ...weekData(k), [el.dataset.f]: el.value }; Store.put('week:' + k, 'week', w); return toast('Gespeichert'); }
   if (a === 'dayNote') { setDay(el.dataset.week, el.dataset.day, { note: el.value }); return toast('Gespeichert'); }
@@ -2057,6 +2227,7 @@ function migrate13() {
     }
     Store.put('setting:migr13', 'setting', { done: D.today() }, true);
   }
+  seedZiele();
   Undo.off--; if (Object.keys(Store.pending).length) Store.flushSoon();
 }
 async function startApp(user) {
